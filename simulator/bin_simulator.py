@@ -4,12 +4,45 @@ import json
 import random
 import threading
 from datetime import datetime, timezone, timedelta
-from kafka import KafkaProducer
+from kafka import KafkaProducer # type: ignore
 from kafka.errors import NoBrokersAvailable #type:ignore
 import config
+from psycopg2.pool import SimpleConnectionPool
 
 stop_event = threading.Event()
 trigger_event = threading.Event()
+
+# Postgres Connection Pool Initialization
+pool = SimpleConnectionPool(
+    minconn=1,
+    maxconn=10,
+    host=config.DB_HOST,
+    port=config.DB_PORT,
+    database=config.DB_NAME,
+    user=config.DB_USER,
+    password=config.DB_PASSWORD
+)
+
+# Function to register bins in the database
+def register_bin(ward: int, bin_id: str):
+    conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ward_bins (ward, bin_id)
+                VALUES (%s, %s)
+                ON CONFLICT (ward, bin_id) DO NOTHING;
+                """,
+                (ward, bin_id)
+            )
+        conn.commit()  # ensure changes are saved
+    except Exception as e:
+        print(f"[ERROR] Failed to register bin {bin_id} in ward {ward}: {e}")
+    finally:
+        pool.putconn(conn)  # return connection to pool
+        print("done")
+
 
 def get_kafka_producer(bootstrap_servers, retries=10, delay=5):
     """Retry logic for KafkaProducer connection"""
@@ -84,16 +117,17 @@ def bin_worker(bin_id):
             try:
                 record = generate_valid_record(bin_id)
 
-                if random.random() < config.error_freq:
+                if random.random() < config.ERROR_FREQ:
                     invalid_record = introduce_data_issues(record.copy())
                     topic = config.INVALID_TOPIC
                     print(f"[DEBUG] Invalid record for bin {bin_id}")
                     producer.send(topic, value=invalid_record)
+                    print(f"[{topic}] {json.dumps(invalid_record)}")
                 else:
+                    register_bin(record["ward"], bin_id)        # Register bin in DB
                     topic = config.VALID_TOPIC
                     producer.send(topic, value=record)
-
-                print(f"[{topic}] {json.dumps(record)}")
+                    print(f"[{topic}] {json.dumps(record)}")
 
             except Exception as e:
                 print(f"[ERROR] Bin {bin_id} error: {e}")

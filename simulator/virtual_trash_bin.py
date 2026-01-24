@@ -3,7 +3,7 @@ import time
 import random
 from datetime import datetime, timezone
 import json
-from kafka import KafkaProducer
+from kafka import KafkaProducer # type: ignore
 from kafka.errors import NoBrokersAvailable #type:ignore
 
 class VirtualTrashBin(threading.Thread):

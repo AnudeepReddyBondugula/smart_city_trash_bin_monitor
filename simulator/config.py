@@ -1,36 +1,59 @@
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
 
-# Kafka config
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-VALID_TOPIC = os.getenv("VALID_TOPIC", "valid-trash-bin-data")
-INVALID_TOPIC = os.getenv("INVALID_TOPIC", "invalid-trash-data")
+def required_env(name: str) -> str:
+    """
+    Fetch a required environment variable.
+    Fail fast if it is missing.
+    """
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        raise RuntimeError(f"❌ Missing required environment variable: {name}")
+    return value
 
-# Data simulator config
+
+# =========================
+# Kafka Configuration
+# =========================
+KAFKA_BOOTSTRAP_SERVERS = required_env("KAFKA_BOOTSTRAP_SERVERS")
+VALID_TOPIC = required_env("VALID_TOPIC")
+INVALID_TOPIC = required_env("INVALID_TOPIC")
+
+
+# =========================
+# Simulator Configuration
+# =========================
 DATA_INTERVAL_SECONDS = int(os.getenv("DATA_INTERVAL_SECONDS", "10"))
-error_freq = float(os.getenv("ERROR_FREQ", "0.2"))
+ERROR_FREQ = float(os.getenv("ERROR_FREQ", "0.2"))
 
+
+# =========================
 # Smart Bin Configuration
+# =========================
 BIN_IDS = ["B001", "B002", "B003", "B004"]
 WARDS = [1, 2, 3, 4, 5]
 
-# Latitude & Longitude Range (Temporary)
+# =========================
+# PostgreSQL Configuration
+# =========================
+
+DB_HOST = os.getenv("DB_HOST", "postgres")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_NAME = os.getenv("DB_NAME", "trash_bin_db")
+DB_USER = os.getenv("DB_USER", "admin")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "admin")
+
+
 LATITUDE_RANGE = (12.9500, 12.9900)
 LONGITUDE_RANGE = (77.5800, 77.6100)
 
-# Sensor Ranges
-FILL_LEVEL_RANGE = (0, 100)          # Percent
+FILL_LEVEL_RANGE = (0, 100)          # %
 TEMPERATURE_RANGE = (20.0, 40.0)     # °C
-HUMIDITY_RANGE = (30, 90)            # Percent
+HUMIDITY_RANGE = (30, 90)            # %
 
-# Error Types to Simulate
 ERROR_TYPES = [
-    "none",
     "null",
     "out_of_range",
-    "duplicate",
     "timestamp_skew",
     "incomplete",
     "corrupted"

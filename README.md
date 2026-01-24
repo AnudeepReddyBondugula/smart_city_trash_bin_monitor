@@ -1,69 +1,163 @@
 # 🚮 Smart City Trash Bin Monitor 🏙️
-## 📌 Project Overview
-The Smart City Trash Bin Monitor is a real-time data engineering project that simulates and processes IoT-enabled smart trash bin data to optimize waste collection operations in urban environments. The system ingests live bin data (fill level, location, time), processes and stores it, and provides actionable insights via a real-time dashboard and APIs.
 
-## 🎯 Objective
-+ To improve municipal waste collection by:
+## 📌 Introduction
+Smart City Trash Bin Monitor is a **real-time data engineering project** that simulates and processes IoT-enabled trash bin data using a **fault-tolerant streaming architecture**.  
+The project focuses on building a **production-grade streaming pipeline** that ingests sensor data, cleans and aggregates it in real time, and stores reliable results for downstream consumption.
 
-+ Avoiding bin overflows
+This repository currently implements the **core real-time data pipeline** with strong guarantees around **performance, reliability, and maintainability**.
 
-+ Reducing fuel consumption
+---
 
-+ Dynamically routing garbage trucks
+## 📖 Project Description
+Modern cities generate continuous streams of waste management data from smart bins deployed across wards and zones.  
+This project demonstrates how such data can be:
 
-+ Providing live visibility into waste levels city-wide
+- Ingested in real time
+- Validated and cleaned safely
+- Processed with **exactly-once semantics**
+- Persisted reliably even during failures
+- Scaled and maintained using best practices
 
-## 🧠 Key Features
-🔴 Live Monitoring: View bin fill levels on an interactive map with alert triggers.
+The emphasis of this project is **data engineering correctness and robustness**, not just data movement.
 
-🔁 Real-Time Ingestion: Kafka-based data pipeline for incoming bin sensor data.
+---
 
-🧹 Data Cleaning & Processing: Spark streaming handles noisy or missing data.
+## 🎯 Objectives (Implemented)
+- Real-time ingestion of trash bin sensor data
+- Safe handling of malformed or invalid events
+- Deduplication and late-data handling
+- Ward-level aggregation of bin fill levels
+- Reliable persistence with retry and recovery
+- Environment-driven configuration (Docker-ready)
 
-📈 Dashboard & Analytics: Visual stats on full bins, zone activity, and pickup plans.
+---
 
-📡 API Integration: REST APIs to fetch bin status, historical data, and alerts.
+## 🧠 Key Features (Current Implementation)
 
-## 🏗️ Tech Stack
-Layer	Technology Used
-Data Simulation	Python, Faker, Scheduled Jobs
-Data Ingestion	Apache Kafka
-Data Processing	Apache Spark Structured Streaming
-Data Storage	PostgreSQL / Apache Cassandra
-Backend API	FastAPI
-Dashboard	Streamlit / Plotly Dash
-Orchestration	Apache Airflow (for historical jobs)
-Containerization	Docker
+### ✅ Real-Time Data Ingestion
+- Kafka-based ingestion pipeline
+- Controlled ingestion rate using `maxOffsetsPerTrigger`
+- Separate handling for valid and invalid events
 
-## 📊 Sample KPIs
-Bins over 90% full
+### ✅ Stream Processing with Spark Structured Streaming
+- Stateful processing with watermarking
+- Deduplication based on business keys
+- Windowed aggregations (ward-wise fill levels)
+- Exactly-once guarantees using checkpointing
 
-Ward-wise average fill level
+### ✅ Dead Letter Queue (DLQ)
+- Invalid or malformed events routed to a dedicated Kafka topic
+- DLQ is isolated and does not block the main pipeline
+- Full auditability of bad data
 
-Predicted overflows in 4 hours
+### ✅ Fault Tolerance & Recovery
+- Safe `foreachBatch` execution
+- Database retries with exponential backoff
+- Automatic recovery from Spark restarts
+- No duplicate writes due to idempotent UPSERTs
 
-Optimized pickup route suggestion
+### ✅ Performance Optimized
+- Batch time reduced from ~20s to ~2–6s
+- Optimized Spark parallelism and shuffles
+- Batched database writes
 
-Estimated fuel saved per day
+### ✅ Maintainable & Configurable
+- All infrastructure config externalized via environment variables
+- Schema versioning for forward compatibility
+- Clean modular Spark job structure
 
-## 📂 Project Structure (Sample)
-smart-bin-monitor/
+---
+
+## 🏗️ Current Architecture (Implemented)
+
+Data Simulator (Python)
+↓
+Apache Kafka
+├── valid-trash-bin-data
+└── invalid-trash-bin-data (DLQ)
+↓
+Apache Spark Structured Streaming
+↓
+PostgreSQL (Aggregated Results)
+
+---
+
+## 🧰 Tech Stack (Implemented)
+
+| Layer | Technology |
+|-----|-----------|
+| Data Simulation | Python |
+| Streaming Ingestion | Apache Kafka |
+| Stream Processing | Apache Spark Structured Streaming |
+| Fault Handling | Kafka Dead Letter Queue |
+| Data Storage | PostgreSQL |
+| Containerization | Docker & Docker Compose |
+| Language | Python |
+| Observability | Spark StreamingQueryListener |
+
+---
+
+## 📂 Project Structure (Current)
+
+smart-city-trash-bin-monitor/
 │
-├── data_simulator/           # Python scripts for simulating bin data
-├── kafka_producer/           # Kafka topic producer code
-├── spark_pipeline/           # Spark jobs for data cleaning/transformation
-├── database/                 # PostgreSQL schema and setup scripts
-├── api/                      # FastAPI-based REST endpoints
-├── dashboard/                # Streamlit/Plotly dashboard
-├── airflow/                  # DAGs for batch jobs & reports
-├── docker/                   # Dockerfiles and docker-compose setup
-├── sample_data/              # Sample CSVs used for simulation
+├── simulator/ # Trash bin data simulator
+├── spark-apps/ # Spark Structured Streaming job
+│ ├── kafka_to_postgres.py
+│ ├── config.py
+│ └── Dockerfile
+│
+├── docker-compose.yml # Kafka, Spark, Postgres setup
+├── .env.example # Environment configuration template
 └── README.md
-## 🚀 How to Run
-Detailed instructions on setup, running services, and accessing dashboards are provided in the README Installation Guide.
+
+---
+
+## 🚀 How to Run (Current)
+
+- git clone (https://github.com/AbhiSathya/smart_city_trash_bin_monitor.git)
+
+- cd smart-city-trash-bin-monitor
+
+- docker compose up --build
 
 
-👨‍💻 Author
-Developed by Bondugula, Data Engineer.
-Built as part of a real-world simulation project to demonstrate skills in data pipelines, real-time analytics, and smart city applications.
+Spark will:
 
+- Consume live Kafka data
+
+- Process valid events
+
+- Route invalid events to DLQ
+
+- Persist aggregated results into PostgreSQL
+
+---
+
+## 🧪 Failure Scenarios Handled
+✅ Invalid JSON → routed to DLQ
+
+✅ Duplicate events → deduplicated
+
+✅ Postgres temporarily down → retried safely
+
+✅ Spark restart → resumes from checkpoint
+
+✅ Late data → handled via watermarking
+
+---
+
+## 🔮 Planned Enhancements (Not Implemented Yet)
+The following features are intentionally not implemented yet and are planned as future phases:
+
+🔲 Backend API (FastAPI) for querying bin status
+
+🔲 Dashboard (Map & charts for monitoring)
+
+🔲 Alerting system (overflow thresholds)
+
+🔲 Route optimization & prediction logic
+
+🔲 Historical batch analytics
+
+🔲 Airflow-based orchestration
