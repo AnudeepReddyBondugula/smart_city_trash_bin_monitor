@@ -1,0 +1,45 @@
+name: Docs CI - Validation
+
+on:
+    pull_request:
+        branches:
+            - develop
+
+
+jobs:
+    validate-docs:
+        runs-on: ubuntu-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v4
+
+            -   name: Detect changed files
+                id: changes
+                uses: tj-actions/changed-files@v44
+
+            -   name: Validate feature docs scope
+                if: startsWith(github.head_ref, 'feature/')
+                run: |
+                    echo "Validating feature documentation scope..."
+
+                    BRANCH="${{ github.head_ref }}"
+                    temp=${BRANCH#feature/}
+
+                    SERVICE=${temp%%-*}
+                    TASK=${temp#*-}
+
+                    if [[ -z "$SERVICE" || "$TASK" != "docs"]] then
+                        echo "Invalid Branch name, Expected: feature/<service>-docs"
+                        exit 1
+                    fi
+
+                    echo "📦 Service identified: $SERVICE"
+
+                    for file in ${{ steps.changes.outputs.all_changed_files }}; do
+                        if [[ ! "$file" =~ ^docs/features/$SERVICE ]]; then
+                            echo "Only docs/features/$SERVICE/** is allowed in this branch"
+                            exit 1
+                        fi
+                    done
+            
