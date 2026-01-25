@@ -1,0 +1,85 @@
+name: PR Goverance Controller
+
+on:
+    pull_request:
+        branches: [develop]
+
+jobs:
+    detect-branch:
+        runs-on: ubuntu-latest
+        outputs:
+            type: ${{ steps.detect.outputs.type }}
+            service: ${{ steps.detect.outputs.service }}
+            task: ${{ steps.detect.outputs.task }}
+
+
+        steps:
+            -   name: Detect branch type
+                id: detect
+                run: |
+                    BRANCH="${{ github.head_ref }}"
+                    echo "Branch $BRANCH"
+
+                    if [[ "$BRANCH" =~ ^devops/ ]]; then
+
+                        TASK=${BRANCH#devops/}
+
+                        echo "types=devops" >> $GITHUB_OUTPUT
+                        echo "task=$TASK" >> $GITHUB_OUTPUT
+
+                    elif [[ "$BRANCH" =~ ^platform/ ]]; then
+
+                        TASK=${BRANCH#platform/}
+
+                        echo "type=platform" >> $GITHUB_OUTPUT
+                        echo "task=$TASK" >> $GITHUB_OUTPUT
+                    
+                    elif [[ "$BRANCH" =~ ^feature/ ]]; then
+                        
+                        service_task=${BRANCH#feature/}
+                        SERVICE=${service_task%%-*}
+                        TASK=${service_task#*-}
+
+                        echo "type=feature" >> $GITHUB_OUTPUT
+                        echo "service=$SERVICE" >> $GITHUB_OUTPUT
+                        echo "task=$TASK" >> $GITHUB_OUTPUT
+
+                    elif [[ "$BRANCH" =~ ^bugfix/ ]]; then
+                        echo "type=bugfix" >> $GITHUB_OUTPUT
+
+                    else
+                        echo "❌ Unknown branch type"
+                        exit 1
+                    fi
+
+
+    devops:
+        needs: detect-branch
+        if: needs.detect-branch.outputs.type == 'devops'
+        uses: ./.github/workflows/devops-policy.yml
+        with:
+            task: ${{ needs.detect-branch.outputs.task }}
+
+    platform:
+        needs: detect-branch
+        if: needs.detect-branch.outputs.type == 'platform'
+        uses: ./.github/workflows/platform-policy.yml
+        with:
+            task: ${{ needs.detect-branch.outputs.task }}
+
+    feature:
+        needs: detect-branch
+        if: needs.detect-branch.outputs.type == 'feature'
+        uses: ./.github/workflows/feature-policy.yml
+        with:
+            service: ${{ needs.detect-branch.outputs.service }}
+            task: ${{ needs.detect-branch.outputs.task }}
+
+    bugfix:
+        needs: detect-branch
+        if: needs.detect-branch.outputs.type == 'bugfix'
+        uses: ./.github/workflows/bugfix-policy.yml
+        with:
+            task: ${{ needs.detect-branch.outputs.task }}
+
+

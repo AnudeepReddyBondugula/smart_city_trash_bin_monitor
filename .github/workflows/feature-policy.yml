@@ -1,0 +1,73 @@
+name: Feature Branch Policy
+
+on:
+    workflow_call:
+        inputs:
+            service:
+                required: true
+                type: string
+            
+            task:
+                required: true
+                type: string
+
+jobs:
+    
+    enfore-feature-policy:
+        runs-on: ubuntu-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v4
+
+            -   name: Get changed files
+                id: changes
+                uses: tj-actions/changed-files@v44
+
+            -   name: Enforce feature scope
+                run: |
+                    set -e
+
+                    SERVICE=${{ inputs.service }}
+                    TASK=${{ inputs.task }}
+
+                    echo "🔍 Enforcing feature policy for service: $SERVICE"
+
+                    echo "Changed files:"
+
+                    for file in ${{ steps.changes.outputs.all_changed_files }}; do
+                        echo " - $file"
+                    done
+
+                    if [[ $TASK == 'docs' ]]; then
+                        for file in ${{ steps.changes.outputs.all_changed_files }}; do
+
+                            # Allow only docs/features/<service>/ directory
+                            if [[ "$file" =~ ^docs/features/$SERVICE/ ]]; then
+                            continue
+                            fi
+
+                            echo "❌ Invalid change detected: $file"
+                            echo "Feature branches may ONLY modify:"
+                            echo "  docs/features/$SERVICE/**"
+                            exit 1
+                        done
+                    else
+
+                        for file in ${{ steps.changes.outputs.all_changed_files }}; do
+
+                            # Allow only this service's directory
+                            if [[ "$file" =~ ^$SERVICE/ ]]; then
+                            continue
+                            fi
+
+                            echo "❌ Invalid change detected: $file"
+                            echo "Feature branches may ONLY modify:"
+                            echo "  $SERVICE/**"
+                            exit 1
+                        done
+
+                    if
+
+                    
+                    echo "✅ Feature policy passed"
