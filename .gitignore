@@ -1,0 +1,18 @@
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# pytest
+.pytest_cache/
+
+# yaml files
+*.yaml
+
+# environment files
+.env
+venv/
+
+# event.json for local ci pipeline testing 
+event.json

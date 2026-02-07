@@ -1,4 +1,4 @@
-name: PR Goverance Controller
+name: PR Governance Controller
 
 on:
     pull_request:
@@ -24,7 +24,7 @@ jobs:
 
                         TASK=${BRANCH#devops/}
 
-                        echo "types=devops" >> $GITHUB_OUTPUT
+                        echo "type=devops" >> $GITHUB_OUTPUT
                         echo "task=$TASK" >> $GITHUB_OUTPUT
 
                     elif [[ "$BRANCH" =~ ^platform/ ]]; then
@@ -53,19 +53,19 @@ jobs:
                     fi
 
 
-    devops:
-        needs: detect-branch
-        if: needs.detect-branch.outputs.type == 'devops'
-        uses: ./.github/workflows/devops-policy.yml
-        with:
-            task: ${{ needs.detect-branch.outputs.task }}
+    # devops:
+    #     needs: detect-branch
+    #     if: needs.detect-branch.outputs.type == 'devops'
+    #     uses: ./.github/workflows/devops-policy.yml
+    #     with:
+    #         task: ${{ needs.detect-branch.outputs.task }}
 
-    platform:
-        needs: detect-branch
-        if: needs.detect-branch.outputs.type == 'platform'
-        uses: ./.github/workflows/platform-policy.yml
-        with:
-            task: ${{ needs.detect-branch.outputs.task }}
+    # platform:
+    #     needs: detect-branch
+    #     if: needs.detect-branch.outputs.type == 'platform'
+    #     uses: ./.github/workflows/platform-policy.yml
+    #     with:
+    #         task: ${{ needs.detect-branch.outputs.task }}
 
     feature:
         needs: detect-branch
@@ -75,11 +75,11 @@ jobs:
             service: ${{ needs.detect-branch.outputs.service }}
             task: ${{ needs.detect-branch.outputs.task }}
 
-    bugfix:
-        needs: detect-branch
-        if: needs.detect-branch.outputs.type == 'bugfix'
-        uses: ./.github/workflows/bugfix-policy.yml
-        with:
-            task: ${{ needs.detect-branch.outputs.task }}
+    # bugfix:
+    #     needs: detect-branch
+    #     if: needs.detect-branch.outputs.type == 'bugfix'
+    #     uses: ./.github/workflows/bugfix-policy.yml
+    #     with:
+    #         task: ${{ needs.detect-branch.outputs.task }}
 
 

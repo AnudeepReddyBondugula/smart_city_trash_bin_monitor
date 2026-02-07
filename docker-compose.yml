@@ -1,0 +1,6 @@
+services:
+  simulator:
+    build:
+      context: ./binforge
+    container_name: BinForge
+    restart: on-failure
