@@ -1,163 +1,109 @@
-# 🚮 Smart City Trash Bin Monitor 🏙️
+# Smart City Trash Bin Monitor
 
-## 📌 Introduction
-Smart City Trash Bin Monitor is a **real-time data engineering project** that simulates and processes IoT-enabled trash bin data using a **fault-tolerant streaming architecture**.  
-The project focuses on building a **production-grade streaming pipeline** that ingests sensor data, cleans and aggregates it in real time, and stores reliable results for downstream consumption.
+A real-time data pipeline and dashboard for monitoring smart city trash bins. This project simulates IoT devices sending trash bin fill-level data, processes it through Apache Kafka and Apache Spark, stores it in a PostgreSQL database, and provides a FastAPI backend and a Next.js frontend to visualize the data.
 
-This repository currently implements the **core real-time data pipeline** with strong guarantees around **performance, reliability, and maintainability**.
+## Architecture
 
----
+1. **Simulator (`simulator/`)**: A Python script simulating IoT trash bins. It generates both valid and invalid events and pushes them to Kafka topics.
+2. **Kafka (`docker-compose.yml`)**: A message broker that queues the incoming IoT data.
+3. **Consumer (`consumer/`)**: A Python consumer that reads from the invalid events topic and logs them to the database for auditing.
+4. **Spark (`spark-apps/`)**: A PySpark structured streaming application that aggregates valid trash bin events over time windows to calculate average fill levels and risk scores, saving the results to PostgreSQL.
+5. **Backend (`backend/api/`)**: A FastAPI application providing REST endpoints for the frontend. It uses SQLAlchemy and Alembic for database migrations.
+6. **Frontend (`frontend/`)**: A Next.js application that provides a dashboard for city officials to monitor bin fill levels and receive alerts.
 
-## 📖 Project Description
-Modern cities generate continuous streams of waste management data from smart bins deployed across wards and zones.  
-This project demonstrates how such data can be:
+## Prerequisites
 
-- Ingested in real time
-- Validated and cleaned safely
-- Processed with **exactly-once semantics**
-- Persisted reliably even during failures
-- Scaled and maintained using best practices
+- **Docker & Docker Compose**: Ensure you have Docker installed and running on your machine.
+- **Node.js 20+**: If you want to run the frontend application locally outside of Docker.
 
-The emphasis of this project is **data engineering correctness and robustness**, not just data movement.
+## Setup
 
----
+1. **Clone the repository**:
+   ```bash
+   git clone <repo-url>
+   cd smart_city_trash_bin_monitor
+   ```
 
-## 🎯 Objectives (Implemented)
-- Real-time ingestion of trash bin sensor data
-- Safe handling of malformed or invalid events
-- Deduplication and late-data handling
-- Ward-level aggregation of bin fill levels
-- Reliable persistence with retry and recovery
-- Environment-driven configuration (Docker-ready)
+2. **Environment Variables**:
+   The project requires a `.env` file in the root directory. You can use the provided `.env` configuration (if available) or create your own based on the `docker-compose.yml` defaults:
+   ```env
+   DB_NAME=trash_bin_db
+   DB_USER=admin
+   DB_PASSWORD=admin
+   DB_HOST=postgres
+   DB_PORT=5432
+   KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+   VALID_TOPIC=valid-trash-bin-data
+   INVALID_TOPIC=invalid-trash-bin-data
+   DATA_INTERVAL_SECONDS=10
+   ERROR_FREQ=0.2
+   CONSUMER_GROUP_ID=trash-bin-consumer-group
+   ```
 
----
+## Running the Project
 
-## 🧠 Key Features (Current Implementation)
+The entire infrastructure can be brought up using Docker Compose. 
+This will spin up Zookeeper, Kafka, PostgreSQL, Redis, the Simulator, the Consumer, the Spark streaming job, and the Backend API.
 
-### ✅ Real-Time Data Ingestion
-- Kafka-based ingestion pipeline
-- Controlled ingestion rate using `maxOffsetsPerTrigger`
-- Separate handling for valid and invalid events
+```bash
+docker-compose up -d --build
+```
 
-### ✅ Stream Processing with Spark Structured Streaming
-- Stateful processing with watermarking
-- Deduplication based on business keys
-- Windowed aggregations (ward-wise fill levels)
-- Exactly-once guarantees using checkpointing
+### Running the Frontend
 
-### ✅ Dead Letter Queue (DLQ)
-- Invalid or malformed events routed to a dedicated Kafka topic
-- DLQ is isolated and does not block the main pipeline
-- Full auditability of bad data
+The Next.js frontend is not included in the `docker-compose` stack by default so that it can be actively developed locally. To run the frontend:
 
-### ✅ Fault Tolerance & Recovery
-- Safe `foreachBatch` execution
-- Database retries with exponential backoff
-- Automatic recovery from Spark restarts
-- No duplicate writes due to idempotent UPSERTs
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies (requires Node.js 20+):
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+The frontend dashboard will be available at [http://localhost:3000](http://localhost:3000).
 
-### ✅ Performance Optimized
-- Batch time reduced from ~20s to ~2–6s
-- Optimized Spark parallelism and shuffles
-- Batched database writes
+### Database Migrations
 
-### ✅ Maintainable & Configurable
-- All infrastructure config externalized via environment variables
-- Schema versioning for forward compatibility
-- Clean modular Spark job structure
+The FastAPI backend automatically applies database migrations upon startup using Alembic. You do not need to run migrations manually unless you are making changes to the schema.
 
----
+To create a new migration after modifying the SQLAlchemy models in `backend/api/app/models/db_models.py`:
+1. Navigate to the backend API directory:
+   ```bash
+   cd backend/api
+   ```
+2. Activate your virtual environment and run Alembic (ensure your DB environment variables point to your local development database):
+   ```bash
+   export DB_HOST=localhost
+   export DB_PORT=5433
+   alembic revision --autogenerate -m "Your migration description"
+   ```
 
-## 🏗️ Current Architecture (Implemented)
+*Note: The PostgreSQL port is mapped to `5433` on the host machine to prevent conflicts with local instances.*
 
-Data Simulator (Python)
-↓
-Apache Kafka
-├── valid-trash-bin-data
-└── invalid-trash-bin-data (DLQ)
-↓
-Apache Spark Structured Streaming
-↓
-PostgreSQL (Aggregated Results)
+### Default Users
 
----
+The initial database seed (`init.sql`) provides the following default users:
+- **Admin**: Username: `admin` | Password: `admin`
+- **Viewer**: Username: `viewer` | Password: `viewer`
 
-## 🧰 Tech Stack (Implemented)
+## Services Overview
 
-| Layer | Technology |
-|-----|-----------|
-| Data Simulation | Python |
-| Streaming Ingestion | Apache Kafka |
-| Stream Processing | Apache Spark Structured Streaming |
-| Fault Handling | Kafka Dead Letter Queue |
-| Data Storage | PostgreSQL |
-| Containerization | Docker & Docker Compose |
-| Language | Python |
-| Observability | Spark StreamingQueryListener |
+- **Kafka Broker**: `localhost:9092`
+- **PostgreSQL**: `localhost:5433`
+- **Redis**: `localhost:6380`
+- **Spark Web UI**: [http://localhost:4040](http://localhost:4040)
+- **FastAPI Backend (Swagger UI)**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
----
+## Troubleshooting
 
-## 📂 Project Structure (Current)
-
-smart-city-trash-bin-monitor/
-│
-├── simulator/ # Trash bin data simulator
-├── spark-apps/ # Spark Structured Streaming job
-│ ├── kafka_to_postgres.py
-│ ├── config.py
-│ └── Dockerfile
-│
-├── docker-compose.yml # Kafka, Spark, Postgres setup
-├── .env.example # Environment configuration template
-└── README.md
-
----
-
-## 🚀 How to Run (Current)
-
-- git clone (https://github.com/AbhiSathya/smart_city_trash_bin_monitor.git)
-
-- cd smart-city-trash-bin-monitor
-
-- docker compose up --build
-
-
-Spark will:
-
-- Consume live Kafka data
-
-- Process valid events
-
-- Route invalid events to DLQ
-
-- Persist aggregated results into PostgreSQL
-
----
-
-## 🧪 Failure Scenarios Handled
-✅ Invalid JSON → routed to DLQ
-
-✅ Duplicate events → deduplicated
-
-✅ Postgres temporarily down → retried safely
-
-✅ Spark restart → resumes from checkpoint
-
-✅ Late data → handled via watermarking
-
----
-
-## 🔮 Planned Enhancements (Not Implemented Yet)
-The following features are intentionally not implemented yet and are planned as future phases:
-
-🔲 Backend API (FastAPI) for querying bin status
-
-🔲 Dashboard (Map & charts for monitoring)
-
-🔲 Alerting system (overflow thresholds)
-
-🔲 Route optimization & prediction logic
-
-🔲 Historical batch analytics
-
-🔲 Airflow-based orchestration
+- **Containers failing to start due to port conflicts**: Check if you have existing services running on ports `2181` (Zookeeper), `9092` (Kafka), `5433` (Postgres host mapping), `6380` (Redis host mapping), or `8000` (FastAPI).
+- **Stale Volumes / KeyErrors**: If you encounter Docker Compose issues related to container recreation or volumes, tear down the environment and remove volumes:
+  ```bash
+  docker-compose down -v
+  docker-compose up -d --build
+  ```
