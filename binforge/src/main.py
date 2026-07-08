@@ -4,9 +4,29 @@ import signal
 from src.kafka_producer import kafka_client
 from src.manager import SimulationManager
 from src.database import engine
+import sys
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import colorlog
+
+handler = colorlog.StreamHandler()
+handler.setFormatter(colorlog.ColoredFormatter(
+    '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    log_colors={
+        'DEBUG': 'cyan',
+        'INFO': 'green',
+        'WARNING': 'yellow',
+        'ERROR': 'red',
+        'CRITICAL': 'bold_red',
+    }
+))
+
+logger = logging.getLogger()
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+
+# Suppress harmless "Topic not found" error during auto-creation
+logging.getLogger("aiokafka.cluster").setLevel(logging.CRITICAL)
 
 async def main():
     logger.info("Starting BinForge Simulator")
@@ -22,15 +42,17 @@ async def main():
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
-    def handle_shutdown():
+    def handle_shutdown(*args):
         logger.info("Shutdown signal received")
-        stop_event.set()
+        loop.call_soon_threadsafe(stop_event.set)
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, handle_shutdown)
-        except NotImplementedError:
-            pass # add_signal_handler not implemented on Windows
+    if sys.platform == "win32":
+        # Windows does not support loop.add_signal_handler
+        signal.signal(signal.SIGINT, handle_shutdown)
+        signal.signal(signal.SIGTERM, handle_shutdown)
+    else:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: handle_shutdown())
 
     await stop_event.wait()
     
