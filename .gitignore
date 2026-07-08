@@ -7,12 +7,15 @@ __pycache__/
 # pytest
 .pytest_cache/
 
-# yaml files
-*.yaml
-
 # environment files
-.env
-venv/
+.env.local
+.venv/
 
-# event.json for local ci pipeline testing 
-event.json
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+
+# logs
+*.log
+/tmp/kraft-combined-logs
