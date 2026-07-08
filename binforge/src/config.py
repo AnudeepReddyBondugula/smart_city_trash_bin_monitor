@@ -8,6 +8,6 @@ class Settings(BaseSettings):
     TELEMETRY_INTERVAL_SEC: int = 5
     DB_POLL_INTERVAL_SEC: int = 5
 
-    model_config = SettingsConfigDict(env_file=".env.local", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=os.getenv("ENV_FILE", ".env.local"), env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

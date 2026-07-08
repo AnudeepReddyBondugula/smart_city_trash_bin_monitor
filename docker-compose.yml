@@ -1,9 +1,10 @@
-version: '3.8'
 
 services:
   postgres:
     image: postgres:15-alpine
     container_name: smartbin_postgres
+    env_file:
+      - ./binforge/.env.docker.local
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -13,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-smart_city}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-smart_city}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -41,8 +42,20 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-      # Workaround for formatting the storage directory
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+
+  binforge_simulator:
+    build:
+      context: ./binforge
+      dockerfile: Dockerfile
+    container_name: binforge_simulator
+    env_file:
+      - ./binforge/.env.docker.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
 
 volumes:
   postgres_data:
