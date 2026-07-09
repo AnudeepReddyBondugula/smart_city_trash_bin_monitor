@@ -1,9 +1,10 @@
 Write-Host "Ensuring infrastructure is running..."
 
-# Go to project root and run docker-compose
-Set-Location ..
-docker-compose -f docker-compose.infra.yml up -d
-Set-Location binforge
+# Go to repo root and start only infrastructure services
+$repoRoot = Resolve-Path "$PSScriptRoot\..\.."
+Set-Location $repoRoot
+docker compose -f docker-compose.yml up -d postgres kafka
+Set-Location "$repoRoot\binforge"
 
 Write-Host "Waiting for PostgreSQL to be ready..."
 while ($true) {

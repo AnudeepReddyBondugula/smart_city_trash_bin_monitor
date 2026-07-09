@@ -22,7 +22,7 @@ Build and start the unified Docker stack:
 ```bash
 docker compose up -d --build
 ```
-*(The `binforge_simulator` container will initially crash if the database is unseeded. This is expected).*
+*(The simulator will not emit telemetry until the database is migrated and seeded.)*
 
 ### 3. Database Migration & Seeding
 Initialize the schema and seed mock data using a one-off container:
