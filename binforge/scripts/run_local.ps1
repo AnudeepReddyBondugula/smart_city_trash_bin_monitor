@@ -9,7 +9,7 @@ Set-Location "$repoRoot\binforge"
 Write-Host "Waiting for PostgreSQL to be ready..."
 while ($true) {
     # Check if postgres is ready
-    $result = docker exec smartbin_postgres pg_isready -U postgres
+    $result = docker exec smartbin_postgres pg_isready -U $(if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "postgres" })
     if ($result -match "accepting connections") {
         break
     }

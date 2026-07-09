@@ -22,7 +22,7 @@ class KafkaClient:
                 logger.info(f"Kafka producer started on {settings.KAFKA_BROKERS}")
                 return
             except Exception as e:
-                logger.warning(f"Kafka not ready yet, retrying... ({i+1}/{retries})")
+                logger.warning(f"Kafka not ready yet ({e}), retrying... ({i+1}/{retries})")
                 if self.producer:
                     try:
                         await self.producer.stop()
@@ -37,6 +37,9 @@ class KafkaClient:
         logger.info("Kafka producer stopped")
 
     async def send_telemetry(self, bin_id: str, payload: dict):
+        if not self.producer:
+            logger.error(f"Kafka producer is not started; dropping telemetry for {bin_id}")
+            return
         try:
             await self.producer.send_and_wait(
                 topic=settings.KAFKA_TOPIC,
