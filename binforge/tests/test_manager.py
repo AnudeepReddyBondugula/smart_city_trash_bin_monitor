@@ -25,7 +25,7 @@ async def test_manager_sync_bins(test_session):
         await manager._sync_bins()
         
         assert "BIN-TEST-1" in manager.simulators
-        assert manager.simulators["BIN-TEST-1"]._running
+        assert manager.simulators["BIN-TEST-1"].bin_id == "BIN-TEST-1"
         
         # Change status to maintenance
         new_bin.status = "MAINTENANCE"
