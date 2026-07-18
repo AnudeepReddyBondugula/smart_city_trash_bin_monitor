@@ -1,6 +1,5 @@
 import pytest
-import asyncio
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock
 from src.models.bin import Bin
 from src.simulator.bin_simulator import BinSimulator
 
@@ -26,6 +25,21 @@ async def test_start_and_stop(bin_instance):
     await simulator.stop()
     assert not simulator._running
     assert simulator._task.done()
+
+@pytest.mark.asyncio
+async def test_stop_when_already_stopped(bin_instance, caplog):
+    """
+    Test that stopping a simulator which is not running is a safe no-op.
+    Verifies a warning is logged and no task cancellation is attempted.
+    """
+    simulator = BinSimulator(bin_instance)
+    assert not simulator._running
+
+    await simulator.stop()
+
+    assert not simulator._running
+    assert simulator._task is None
+    assert "Simulator for bin 'bin_1' is already stopped." in caplog.text
 
 @pytest.mark.asyncio
 async def test_start_already_running(bin_instance, caplog):

@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from src.simulator.simuation_manager import SimulationManager
 from src.models.bin import Bin
 from src.database import SmartBin
+from sqlalchemy.sql.expression import Select
 
 @pytest.fixture
 def sim_manager():
@@ -38,6 +39,36 @@ async def test_initialize(mock_session_maker, sim_manager):
         assert len(sim_manager._simulators) == 1
         assert "db_bin_1" in sim_manager._simulators
         mock_sim_instance.start.assert_called_once()
+
+        # Verify the query passed to session.execute filters ACTIVE bins only
+        executed_stmt = mock_session.execute.call_args.args[0]
+        assert isinstance(executed_stmt, Select)
+        # Compile to SQL string and confirm a WHERE on status = 'ACTIVE' is present
+        compiled_sql = str(
+            executed_stmt.compile(compile_kwargs={"literal_binds": True})
+        )
+        assert "smart_bins" in compiled_sql
+        assert "ACTIVE" in compiled_sql
+
+@pytest.mark.asyncio
+@patch('src.simulator.simuation_manager.AsyncSessionLocal')
+async def test_initialize_empty_database(mock_session_maker, sim_manager):
+    """
+    Test initialize() when the database has no ACTIVE bins.
+    Verifies the registry stays empty and no simulators are created.
+    """
+    mock_session = AsyncMock()
+    mock_session_maker.return_value.__aenter__.return_value = mock_session
+
+    mock_result = MagicMock()
+    mock_result.scalars().all.return_value = []
+    mock_session.execute.return_value = mock_result
+
+    with patch('src.simulator.simuation_manager.BinSimulator') as MockSimulator:
+        await sim_manager.initialize()
+
+        MockSimulator.assert_not_called()
+        assert len(sim_manager._simulators) == 0
 
 def test_add_bin(sim_manager, bin_instance):
     """
@@ -120,3 +151,44 @@ async def test_stop_all(sim_manager):
     mock_sim1.stop.assert_called_once()
     mock_sim2.stop.assert_called_once()
     assert len(sim_manager._simulators) == 0
+
+def test_update_bin_not_found(sim_manager, caplog):
+    """
+    Test updating a bin that is not actively managed by the SimulationManager.
+    Verifies it logs a warning and exits safely without errors.
+    """
+    sim_manager.update_bin("nonexistent", 30.0, 40.0)
+
+    assert "No simulator found for bin 'nonexistent'." in caplog.text
+    assert len(sim_manager._simulators) == 0
+
+def test_get_simulator(sim_manager, bin_instance):
+    """
+    Test the get_simulator lookup helper.
+    Verifies it returns the simulator for a known bin and None otherwise.
+    """
+    mock_simulator = MagicMock()
+    sim_manager._simulators["bin_1"] = mock_simulator
+
+    assert sim_manager.get_simulator("bin_1") is mock_simulator
+    assert sim_manager.get_simulator("missing") is None
+
+def test_exists(sim_manager):
+    """
+    Test the exists helper.
+    Verifies it returns True for a registered bin and False for an unknown one.
+    """
+    sim_manager._simulators["bin_1"] = MagicMock()
+
+    assert sim_manager.exists("bin_1") is True
+    assert sim_manager.exists("missing") is False
+
+def test_simulators_property(sim_manager):
+    """
+    Test the simulators property exposes the internal registry dictionary.
+    """
+    mock_simulator = MagicMock()
+    sim_manager._simulators["bin_1"] = mock_simulator
+
+    assert sim_manager.simulators is sim_manager._simulators
+    assert sim_manager.simulators["bin_1"] is mock_simulator
