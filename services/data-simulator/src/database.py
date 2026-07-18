@@ -3,7 +3,9 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column
 from sqlalchemy.sql import func
 from sqlalchemy import String, Float, DateTime
 from datetime import datetime
-from config import settings
+from config import get_settings
+
+settings = get_settings()
 
 Base = declarative_base()
 

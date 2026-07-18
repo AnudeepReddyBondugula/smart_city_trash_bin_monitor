@@ -4,7 +4,9 @@ from faker import Faker
 
 from models.bin import Bin
 from kafka_producer import kafka_client
-from config import settings
+from config import get_settings
+
+settings = get_settings()
 
 import logging
 

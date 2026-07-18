@@ -1,5 +1,6 @@
 from pydantic import computed_field
 from pydantic_settings import BaseSettings
+from functools import lru_cache
 
 
 class Settings(BaseSettings):
@@ -26,4 +27,9 @@ class Settings(BaseSettings):
         )
 
 
-settings = Settings()
+# settings = Settings() <- this will crash when they are ran by test cases
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

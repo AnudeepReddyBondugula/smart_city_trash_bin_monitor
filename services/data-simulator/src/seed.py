@@ -2,7 +2,9 @@ import asyncio
 import argparse
 
 from database import SmartBin
-from config import settings
+from config import get_settings
+
+settings = get_settings()
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from faker import Faker
 from sqlalchemy import delete

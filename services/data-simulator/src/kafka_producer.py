@@ -1,7 +1,9 @@
 import json
 import asyncio
 from aiokafka import AIOKafkaProducer
-from config import settings
+from config import get_settings
+
+settings = get_settings()
 
 import logging
 

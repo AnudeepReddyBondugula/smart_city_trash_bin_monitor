@@ -2,7 +2,7 @@
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: smartbin_postgres_dev
+    container_name: smartbin_postgres
     env_file:
       - ./services/data-simulator/.env.docker
     ports:
@@ -17,7 +17,7 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:7.4.1
-    container_name: smartbin_kafka_dev
+    container_name: smartbin_kafka
     ports:
       - "9092:9092"
       - "9093:9093"
@@ -44,14 +44,12 @@ services:
     build:
       context: ./services/data-simulator/
       dockerfile: Dockerfile
-    container_name: data_simulator_dev
+    container_name: data_simulator
     env_file:
       - ./services/data-simulator/.env.docker
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
-        condition: service_started
 
 volumes:
   postgres_data:
