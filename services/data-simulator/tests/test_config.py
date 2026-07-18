@@ -43,7 +43,8 @@ def test_environment_overrides_defaults():
     assert settings.SIMULATION_INTERVAL == 10
 
 
-def test_missing_required_field_raises_validation_error():
+def test_missing_required_field_raises_validation_error(monkeypatch):
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
     with pytest.raises(ValidationError):
         Settings(
             POSTGRES_PORT=5432,
