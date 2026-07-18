@@ -1,7 +1,7 @@
 import asyncio
 import signal
 from kafka_producer import kafka_client
-from simulator.simuation_manager import SimulationManager
+from simulator.simulation_manager import SimulationManager
 from database import engine
 import sys
 
@@ -25,7 +25,7 @@ async def main():
     logger.info("Kafka Client Started Successfully")
 
     # Start Manager
-    logger.info("Initializing Simluation Manager")
+    logger.info("Initializing Simulation Manager")
     manager = SimulationManager()
     await manager.initialize()
 

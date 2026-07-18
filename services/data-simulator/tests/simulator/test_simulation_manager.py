@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from src.simulator.simuation_manager import SimulationManager
+from src.simulator.simulation_manager import SimulationManager
 from src.models.bin import Bin
 from src.database import SmartBin
 from sqlalchemy.sql.expression import Select
@@ -14,7 +14,7 @@ def bin_instance():
     return Bin("bin_1", 100.0, 10.0, 20.0)
 
 @pytest.mark.asyncio
-@patch('src.simulator.simuation_manager.AsyncSessionLocal')
+@patch('src.simulator.simulation_manager.AsyncSessionLocal')
 async def test_initialize(mock_session_maker, sim_manager):
     """
     Test the initialization of the SimulationManager from the database.
@@ -30,7 +30,7 @@ async def test_initialize(mock_session_maker, sim_manager):
     mock_result.scalars().all.return_value = [mock_db_bin]
     mock_session.execute.return_value = mock_result
     
-    with patch('src.simulator.simuation_manager.BinSimulator') as MockSimulator:
+    with patch('src.simulator.simulation_manager.BinSimulator') as MockSimulator:
         mock_sim_instance = MagicMock()
         MockSimulator.return_value = mock_sim_instance
         
@@ -51,7 +51,7 @@ async def test_initialize(mock_session_maker, sim_manager):
         assert "ACTIVE" in compiled_sql
 
 @pytest.mark.asyncio
-@patch('src.simulator.simuation_manager.AsyncSessionLocal')
+@patch('src.simulator.simulation_manager.AsyncSessionLocal')
 async def test_initialize_empty_database(mock_session_maker, sim_manager):
     """
     Test initialize() when the database has no ACTIVE bins.
@@ -64,7 +64,7 @@ async def test_initialize_empty_database(mock_session_maker, sim_manager):
     mock_result.scalars().all.return_value = []
     mock_session.execute.return_value = mock_result
 
-    with patch('src.simulator.simuation_manager.BinSimulator') as MockSimulator:
+    with patch('src.simulator.simulation_manager.BinSimulator') as MockSimulator:
         await sim_manager.initialize()
 
         MockSimulator.assert_not_called()
@@ -76,7 +76,7 @@ def test_add_bin(sim_manager, bin_instance):
     Ensures that it correctly instantiates a BinSimulator, starts it, 
     and registers it within the active simulators dictionary.
     """
-    with patch('src.simulator.simuation_manager.BinSimulator') as MockSimulator:
+    with patch('src.simulator.simulation_manager.BinSimulator') as MockSimulator:
         mock_sim_instance = MagicMock()
         MockSimulator.return_value = mock_sim_instance
         

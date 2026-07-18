@@ -54,7 +54,7 @@ jobs:
                         for file in ${{ steps.changes.outputs.all_changed_files }}; do
                             # Allow only this service's directory
                             if [[ "$file" =~ ^services/$SERVICE/ ]]; then
-                            continue
+                                continue
                             fi
 
                             echo "❌ Invalid change detected: $file"
@@ -76,10 +76,10 @@ jobs:
         -   name: Set up Python
             uses: actions/setup-python@v5
             with:
-                python-version: '3.11'
+                python-version: '3.12'
         
         -   name: Ruff Lint
-            uses: chartboost/ruff-action@v1
+            uses: astral-sh/ruff-action@v3
             with:
                 args: check .
 
