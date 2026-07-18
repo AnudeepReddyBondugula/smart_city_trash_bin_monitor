@@ -2,11 +2,11 @@
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: smartbin_postgres
+    container_name: smartbin_postgres_dev
     env_file:
-      - ./binforge/.env.docker.local
+      - ./services/data-simulator/.env.docker
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,7 +17,7 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:7.4.1
-    container_name: smartbin_kafka
+    container_name: smartbin_kafka_dev
     ports:
       - "9092:9092"
       - "9093:9093"
@@ -40,13 +40,13 @@ services:
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
 
-  binforge_simulator:
+  data_simulator:
     build:
-      context: ./binforge
+      context: ./services/data-simulator/
       dockerfile: Dockerfile
-    container_name: binforge_simulator
+    container_name: data_simulator_dev
     env_file:
-      - ./binforge/.env.docker.local
+      - ./services/data-simulator/.env.docker
     depends_on:
       postgres:
         condition: service_healthy

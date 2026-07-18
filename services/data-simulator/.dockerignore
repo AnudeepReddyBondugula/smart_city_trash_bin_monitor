@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.pytype/
+.ruff_cache/
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Local runtime files
+*.pid
+*.sock
+
+# Environment files
+.env.local
+.env.*
+!.env.docker
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Documentation (optional)
+docs/
+
+# Local database files
+*.sqlite
+*.db
+
+# Terraform (if any)
+.terraform/
+*.tfstate*
+
+# Docker
+docker-compose.override.yml
