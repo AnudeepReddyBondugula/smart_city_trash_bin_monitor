@@ -1,13 +1,11 @@
 import json
 import asyncio
+import logging
 from aiokafka import AIOKafkaProducer
 from config import get_settings
 
-settings = get_settings()
-
-import logging
-
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class KafkaClient:

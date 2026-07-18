@@ -1,16 +1,13 @@
 import asyncio
-
+import logging
 from faker import Faker
 
 from models.bin import Bin
 from kafka_producer import kafka_client
 from config import get_settings
 
-settings = get_settings()
-
-import logging
-
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 fake = Faker()
 

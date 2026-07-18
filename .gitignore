@@ -24,3 +24,4 @@ logs/
 
 # test files
 .coverage
+event.json

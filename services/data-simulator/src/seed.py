@@ -1,15 +1,14 @@
 import asyncio
 import argparse
+import uuid
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from faker import Faker
+from sqlalchemy import delete
 
 from database import SmartBin
 from config import get_settings
 
 settings = get_settings()
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from faker import Faker
-from sqlalchemy import delete
-import uuid
-
 fake = Faker()
 
 
@@ -18,7 +17,7 @@ async def seed_db(count: int, clear: bool):
         print("Error: For safety, you cannot seed more than 500 bins at a time.")
         return
 
-    print(f"Connecting to database...")
+    print("Connecting to database...")
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
