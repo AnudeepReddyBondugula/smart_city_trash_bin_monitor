@@ -1,69 +1,62 @@
-# 🚮 Smart City Trash Bin Monitor 🏙️
-## 📌 Project Overview
-The Smart City Trash Bin Monitor is a real-time data engineering project that simulates and processes IoT-enabled smart trash bin data to optimize waste collection operations in urban environments. The system ingests live bin data (fill level, location, time), processes and stores it, and provides actionable insights via a real-time dashboard and APIs.
+# Smart City Trash Bin Monitor - BinForge 🏙️
 
-## 🎯 Objective
-+ To improve municipal waste collection by:
+BinForge is the data generation service for the Smart City Trash Bin Monitor. It simulates thousands of IoT trash bins concurrently and publishes real-time telemetry (fill levels, locations, timestamps) to Apache Kafka.
 
-+ Avoiding bin overflows
+## Architecture
+- **Simulator**: Python 3.12 (AsyncIO)
+- **Database**: PostgreSQL 15
+- **Message Broker**: Apache Kafka (KRaft mode)
 
-+ Reducing fuel consumption
+## Quick Start (Docker)
 
-+ Dynamically routing garbage trucks
+### 1. Environment Configuration
+The repository includes a template file. You must copy it to create your private `.env.docker.local` file inside the `binforge` directory:
 
-+ Providing live visibility into waste levels city-wide
+```bash
+cp binforge/.env.local.example binforge/.env.docker.local
+```
+*(Note: If you plan to run the Python script natively instead of via Docker, create a `.env.local` file instead).*
 
-## 🧠 Key Features
-🔴 Live Monitoring: View bin fill levels on an interactive map with alert triggers.
+### 2. Start Infrastructure
+Build and start the unified Docker stack:
+```bash
+docker compose up -d --build
+```
+*(The simulator will not emit telemetry until the database is migrated and seeded.)*
 
-🔁 Real-Time Ingestion: Kafka-based data pipeline for incoming bin sensor data.
+### 3. Database Migration & Seeding
+Initialize the schema and seed mock data using a one-off container:
+```bash
+docker compose run --rm binforge_simulator alembic upgrade head
+docker compose run --rm binforge_simulator python scripts/seed.py --count 50
+```
+*(To reset the database later, append `--clear` to the seed command).*
 
-🧹 Data Cleaning & Processing: Spark streaming handles noisy or missing data.
+### 4. Restart Simulator
+Restart the simulator to pick up the seeded data:
+```bash
+docker compose restart binforge_simulator
+```
 
-📈 Dashboard & Analytics: Visual stats on full bins, zone activity, and pickup plans.
+---
 
-📡 API Integration: REST APIs to fetch bin status, historical data, and alerts.
+## Verification & Debugging
 
-## 🏗️ Tech Stack
-Layer	Technology Used
-Data Simulation	Python, Faker, Scheduled Jobs
-Data Ingestion	Apache Kafka
-Data Processing	Apache Spark Structured Streaming
-Data Storage	PostgreSQL / Apache Cassandra
-Backend API	FastAPI
-Dashboard	Streamlit / Plotly Dash
-Orchestration	Apache Airflow (for historical jobs)
-Containerization	Docker
+**View Simulator Logs:**
+```bash
+docker logs binforge_simulator -f
+```
 
-## 📊 Sample KPIs
-Bins over 90% full
+**Verify Postgres Data:**
+```bash
+docker exec -it smartbin_postgres psql -U postgres -d smart_city -c "SELECT bin_id, capacity, latitude, longitude, status FROM smart_bins LIMIT 10;"
+```
 
-Ward-wise average fill level
+**Consume Live Kafka Stream:**
+```bash
+docker exec -it smartbin_kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic smartbin-telemetry-v1
+```
 
-Predicted overflows in 4 hours
-
-Optimized pickup route suggestion
-
-Estimated fuel saved per day
-
-## 📂 Project Structure (Sample)
-smart-bin-monitor/
-│
-├── data_simulator/           # Python scripts for simulating bin data
-├── kafka_producer/           # Kafka topic producer code
-├── spark_pipeline/           # Spark jobs for data cleaning/transformation
-├── database/                 # PostgreSQL schema and setup scripts
-├── api/                      # FastAPI-based REST endpoints
-├── dashboard/                # Streamlit/Plotly dashboard
-├── airflow/                  # DAGs for batch jobs & reports
-├── docker/                   # Dockerfiles and docker-compose setup
-├── sample_data/              # Sample CSVs used for simulation
-└── README.md
-## 🚀 How to Run
-Detailed instructions on setup, running services, and accessing dashboards are provided in the README Installation Guide.
-
-
-👨‍💻 Author
-Developed by Bondugula, Data Engineer.
-Built as part of a real-world simulation project to demonstrate skills in data pipelines, real-time analytics, and smart city applications.
-
+## Operations
+- **Stop Stack**: `docker compose down`
+- **Hard Reset (Wipe all data)**: `docker compose down -v`
