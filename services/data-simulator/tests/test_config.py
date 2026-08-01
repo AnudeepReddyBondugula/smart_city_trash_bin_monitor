@@ -43,7 +43,8 @@ def test_environment_overrides_defaults():
     assert settings.SIMULATION_INTERVAL == 10
 
 
-def test_missing_required_field_raises_validation_error():
+def test_missing_required_field_raises_validation_error(monkeypatch):
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
     with pytest.raises(ValidationError):
         Settings(
             POSTGRES_PORT=5432,
@@ -65,3 +66,12 @@ def test_database_url_changes_when_values_change():
         settings.DATABASE_URL
         == "postgresql+asyncpg://postgres:password@database:5432/production"
     )
+
+
+def test_invalid_port_raises_validation_error():
+    """
+    Test that a non-integer POSTGRES_PORT is rejected by pydantic validation,
+    since the field is typed as int.
+    """
+    with pytest.raises(ValidationError):
+        create_settings(POSTGRES_PORT="not-a-port")

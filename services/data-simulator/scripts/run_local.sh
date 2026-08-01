@@ -21,7 +21,7 @@ docker compose -f ../../../docker-compose.yml up -d postgres kafka
 
 echo
 echo "Waiting for PostgreSQL to become ready..."
-while ! docker exec smartbin_postgres_dev pg_isready -U "${POSTGRES_USER:-postgres}" > /dev/null 2>&1; do
+while ! docker exec smartbin_postgres pg_isready -U "${POSTGRES_USER:-postgres}" > /dev/null 2>&1; do
     sleep 2
 done
 

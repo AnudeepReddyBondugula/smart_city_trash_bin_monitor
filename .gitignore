@@ -21,3 +21,7 @@ __pycache__/
 logs/
 *.log
 /tmp/kraft-combined-logs
+
+# test files
+.coverage
+event.json

@@ -36,9 +36,8 @@ jobs:
                     
                     elif [[ "$BRANCH" =~ ^feature/ ]]; then
                         
-                        service_task=${BRANCH#feature/}
-                        SERVICE=${service_task%%-*}
-                        TASK=${service_task#*-}
+                        SERVICE=$(echo "$BRANCH" | cut -d'/' -f2)
+                        TASK=$(echo "$BRANCH" | cut -d'/' -f3-)
 
                         echo "type=feature" >> $GITHUB_OUTPUT
                         echo "service=$SERVICE" >> $GITHUB_OUTPUT

@@ -40,7 +40,7 @@ def setup_logging(level: str = "INFO") -> logging.Logger:
     # File
     file_handler = RotatingFileHandler(
         LOG_DIR / "simulator.log",
-        maxBytes=20 * 1024 * 1024,  # 10 MB
+        maxBytes=20 * 1024 * 1024,  # 20 MB
         backupCount=5,
     )
     file_handler.setFormatter(formatter)

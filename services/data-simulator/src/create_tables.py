@@ -12,8 +12,6 @@ async def create_tables() -> None:
 
     print("Database tables created (if they did not already exist).")
 
-    await engine.dispose()
-
 
 async def main() -> None:
     try:
