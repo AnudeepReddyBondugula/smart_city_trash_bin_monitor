@@ -1,6 +1,6 @@
 # Smart City Trash Bin Monitor - BinForge 🏙️
 
-BinForge is the data generation service for the Smart City Trash Bin Monitor. It simulates thousands of IoT trash bins concurrently and publishes real-time telemetry (fill levels, locations, timestamps) to Apache Kafka.
+Data Simulator is the data generation service for the Smart City Trash Bin Monitor. It simulates thousands of IoT trash bins concurrently and publishes real-time telemetry (fill levels, locations, timestamps) to Apache Kafka.
 
 ## Architecture
 
