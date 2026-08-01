@@ -1,67 +1,98 @@
 name: Feature Branch Policy
 
+# This workflow is intended to be called from another workflow
+# (e.g. pr-governance.yml) using the workflow_call event.
 on:
-    workflow_call:
-        inputs:
-            service:
-                required: true
-                type: string
-            
-            task:
-                required: true
-                type: string
+  workflow_call:
+    inputs:
+      # Name of the service the feature branch belongs to.
+      # Example:
+      #   feature/data-simulator/add-kafka
+      #             └──────────────┘
+      service:
+        required: true
+        type: string
+
+      # Name of the feature/task.
+      # Example:
+      #   feature/data-simulator/add-kafka
+      #                            └──────┘
+      task:
+        required: true
+        type: string
 
 jobs:
-    
-    enforce-feature-policy:
-        runs-on: ubuntu-latest
+  enforce-feature-policy:
+    name: Enforce Feature Branch Scope
+    runs-on: ubuntu-latest
 
-        steps:
-            -   name: Checkout
-                uses: actions/checkout@v4
+    steps:
+      # Checkout the repository so the workflow can inspect files.
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-            -   name: Get changed files
-                id: changes
-                uses: tj-actions/changed-files@v44
+      # Determine every file modified by the pull request.
+      # The output is used to validate that the developer only
+      # changed files that belong to the intended service.
+      - name: Get changed files
+        id: changes
+        uses: tj-actions/changed-files@v44
 
-            -   name: Enforce feature scope
-                run: |
-                    set -e
+      # Validate that the feature branch only modifies files
+      # within its allowed scope.
+      - name: Enforce feature scope
+        run: |
+          # Exit immediately if any command fails.
+          set -e
 
-                    SERVICE=${{ inputs.service }}
-                    TASK=${{ inputs.task }}
+          SERVICE=${{ inputs.service }}
+          TASK=${{ inputs.task }}
 
-                    echo "🔍 Enforcing feature policy for service: $SERVICE"
+          echo "🔍 Enforcing feature policy for service: $SERVICE"
 
-                    echo "Changed files:"
-                    for file in ${{ steps.changes.outputs.all_changed_files }}; do
-                        echo " - $file"
-                    done
+          echo "Changed files:"
+          for file in ${{ steps.changes.outputs.all_changed_files }}; do
+              echo " - $file"
+          done
 
-                    if [[ "$TASK" == "docs" ]]; then
-                        for file in ${{ steps.changes.outputs.all_changed_files }}; do
-                            # Allow only docs/features/<service>/ directory
-                            if [[ "$file" =~ ^docs/features/$SERVICE/ ]]; then
-                                continue
-                            fi
+          # Documentation-only feature
+          #
+          # If the task is named "docs", allow modifications only
+          # under:
+          #
+          # docs/features/<service>/**
+          #
+          if [[ "$TASK" == "docs" ]]; then
+              for file in ${{ steps.changes.outputs.all_changed_files }}; do
 
-                            echo "❌ Invalid change detected: $file"
-                            echo "Feature branches may ONLY modify:"
-                            echo "  docs/features/$SERVICE/**"
-                            exit 1
-                        done
-                    else
-                        for file in ${{ steps.changes.outputs.all_changed_files }}; do
-                            # Allow only this service's directory
-                            if [[ "$file" =~ ^services/$SERVICE/ ]]; then
-                                continue
-                            fi
+                  if [[ "$file" =~ ^docs/features/$SERVICE/ ]]; then
+                      continue
+                  fi
 
-                            echo "❌ Invalid change detected: $file"
-                            echo "Feature branches may ONLY modify:"
-                            echo "  services/$SERVICE/**"
-                            exit 1
-                        done
-                    fi
+                  echo "❌ Invalid change detected: $file"
+                  echo "Feature branches may ONLY modify:"
+                  echo "  docs/features/$SERVICE/**"
+                  exit 1
+              done
 
-                    echo "✅ Feature policy passed"
+          # Standard feature branch
+          #
+          # Allow modifications only under:
+          #
+          # services/<service>/**
+          #
+          else
+              for file in ${{ steps.changes.outputs.all_changed_files }}; do
+
+                  if [[ "$file" =~ ^services/$SERVICE/ ]]; then
+                      continue
+                  fi
+
+                  echo "❌ Invalid change detected: $file"
+                  echo "Feature branches may ONLY modify:"
+                  echo "  services/$SERVICE/**"
+                  exit 1
+              done
+          fi
+
+          echo "✅ Feature policy passed"
