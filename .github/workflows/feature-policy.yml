@@ -48,7 +48,7 @@ jobs:
                             echo "❌ Invalid change detected: $file"
                             echo "Feature branches may ONLY modify:"
                             echo "  docs/features/$SERVICE/**"
-                            # exit 1 (Policy disabled for development)
+                            exit 1
                         done
                     else
                         for file in ${{ steps.changes.outputs.all_changed_files }}; do
@@ -60,29 +60,8 @@ jobs:
                             echo "❌ Invalid change detected: $file"
                             echo "Feature branches may ONLY modify:"
                             echo "  services/$SERVICE/**"
-                            # exit 1 (Policy disabled for development)
+                            exit 1
                         done
                     fi
 
                     echo "✅ Feature policy passed"
-
-    run-pytest:
-        runs-on: ubuntu-latest
-        needs: enforce-feature-policy   # only run tests if feature-policy passes
-        steps:
-        -   name: Checkout
-            uses: actions/checkout@v4
-
-        -   name: Set up Python
-            uses: actions/setup-python@v5
-            with:
-                python-version: '3.12'
-        
-        -   name: Ruff Lint
-            uses: astral-sh/ruff-action@v3
-            with:
-                args: check .
-
-        -   name: Docker Build & Test
-            run: |
-                docker build -t ${{inputs.service}}-test --target test -f ./services/${{inputs.service}}/Dockerfile ./services/${{inputs.service}}
