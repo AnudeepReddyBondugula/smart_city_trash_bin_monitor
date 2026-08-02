@@ -1,48 +1,67 @@
-# Smart City Trash Bin Monitor - BinForge 🏙️
+# Smart City Trash Bin Monitor — BinForge 🏙️
 
-Data Simulator is the data generation service for the Smart City Trash Bin Monitor. It simulates thousands of IoT trash bins concurrently and publishes real-time telemetry (fill levels, locations, timestamps) to Apache Kafka.
+**Data Simulator** is the data-generation service for the Smart City Trash Bin
+Monitor. It simulates a fleet of IoT trash bins concurrently (one asyncio task
+per bin) and publishes real-time telemetry — fill level, battery level,
+location, timestamp — to Apache Kafka. Static bin metadata lives in PostgreSQL;
+the dynamic telemetry state is generated in memory and streamed out.
 
-## Architecture
+## Stack
 
 - **Simulator**: Python 3.12 (AsyncIO)
-- **Database**: PostgreSQL 15
-- **Message Broker**: Apache Kafka (KRaft mode)
+- **Database**: PostgreSQL 15 (bin metadata only)
+- **Message Broker**: Apache Kafka (KRaft mode, no ZooKeeper)
+
+📚 **Full documentation:** [`docs/features/data-simulator/`](docs/features/data-simulator/)
+— start with [architecture.md](docs/features/data-simulator/architecture.md).
+
+---
 
 ## Quick Start (Docker)
 
-### 1. Environment Configuration
+Run all commands from the repository root.
 
-The repository includes a template file. You must copy it to create your private `.env.docker.local` file inside the `services/data-simulator` directory:
+### 1. Environment configuration
+
+Docker Compose reads `services/data-simulator/.env.docker`. That file is
+git-ignored, so create it from the template on a fresh clone:
 
 ```bash
-cp services/data-simulator/.env.local.example services/data-simulator/.env.docker.local
+cp services/data-simulator/.env.local.example services/data-simulator/.env.docker
 ```
 
-_(Note: If you plan to run the Python script natively instead of via Docker, create a `.env.local` file instead)._
+Set the Docker-network values inside it: `POSTGRES_HOST=postgres` and
+`KAFKA_BOOTSTRAP_SERVERS=kafka:29092`.
 
-### 2. Start Infrastructure
+> ⚠️ Compose reads **`.env.docker`** — not `.env.docker.local`. See
+> [configuration.md](docs/features/data-simulator/configuration.md) for details.
+> _(If you instead run the simulator natively, create `.env.local` with
+> `localhost` values — see [deployment.md](docs/features/data-simulator/deployment.md).)_
 
-Build and start the unified Docker stack:
+### 2. Start the stack
 
 ```bash
 docker compose up -d --build
 ```
 
-_(The simulator will not emit telemetry until the database is migrated and seeded.)_
+_(The simulator emits no telemetry until the schema exists and ACTIVE bins are
+seeded.)_
 
-### 3. Database Migration & Seeding
+### 3. Create the schema and seed data
 
-Initialize the schema and seed mock data using a one-off container:
+The schema is created from ORM metadata (there are no Alembic migrations), then
+seeded with mock bins — both via one-off containers:
 
 ```bash
+docker compose run --rm data_simulator python src/create_tables.py
 docker compose run --rm data_simulator python src/seed.py --count 50
 ```
 
-_(To reset the database later, append `--clear` to the seed command)._
+_(To reset later, add `--clear` to the seed command; max 500 bins per run.)_
 
-### 4. Restart Simulator
+### 4. Restart the simulator
 
-Restart the simulator to pick up the seeded data:
+Bins are loaded once at startup, so restart to pick up the seeded data:
 
 ```bash
 docker compose restart data_simulator
@@ -52,55 +71,71 @@ docker compose restart data_simulator
 
 ## Verification & Debugging
 
-**View Simulator Logs:**
+**Simulator logs:**
 
 ```bash
 docker logs data_simulator -f
 ```
 
-**Verify Postgres Data:**
+**Postgres data:**
 
 ```bash
-docker exec -it smartbin_postgres psql -U postgres -d smart_city -c "SELECT bin_id, capacity, latitude, longitude, status FROM smart_bins LIMIT 10;"
+docker exec -it smartbin_postgres psql -U postgres -d smart_city \
+  -c "SELECT bin_id, capacity, latitude, longitude, status FROM smart_bins LIMIT 10;"
 ```
 
-**Consume Live Kafka Stream:**
+**Live Kafka stream:**
 
 ```bash
-docker exec -it smartbin_kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic smartbin-telemetry-v1
+docker exec -it smartbin_kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 --topic smartbin-telemetry-v1
 ```
+
+More: [operations.md](docs/features/data-simulator/operations.md) ·
+[troubleshooting.md](docs/features/data-simulator/troubleshooting.md).
+
+---
 
 ## Testing
 
-The data simulator comes with a comprehensive `pytest` suite that tests all the core simulation logic, database schema, and Kafka integrations.
-
-To run the tests locally inside the running Docker container:
+A `pytest` suite covers the simulation logic, database model, and Kafka client
+(all mocked — no live infra needed). Run it inside the running container without
+rebuilding:
 
 ```bash
 docker exec -it data_simulator pip install -r requirements-dev.txt
 docker exec -it data_simulator pytest -v
 ```
 
-_(This allows you to test instantly without having to rebuild the Docker image.)_
+Or locally from `services/data-simulator/`: `PYTHONPATH=src pytest -v`. See
+[testing.md](docs/features/data-simulator/testing.md).
 
-## CI/CD Pipeline
+---
 
-We enforce a strict CI/CD pipeline using GitHub Actions to ensure code quality and prevent regressions.
+## CI/CD
 
-**Feature Policy:**
-When creating a feature branch, you must name it `feature/<service>/<task>` (e.g. `feature/data-simulator/add-tests`).
-The pipeline enforces that a feature branch only modifies files within its own service directory (e.g., `services/data-simulator/`).
+GitHub Actions runs on pull requests to **`develop`**
+(see [ci-cd.md](docs/features/data-simulator/ci-cd.md)):
 
-**Local Testing with `act`:**
-You can test the GitHub Actions CI pipeline locally before pushing your code using `act`:
+- **Feature policy** — branches must be named `feature/<service>/<task>` and may
+  modify only their own service (or, for a `docs` task, only
+  `docs/features/<service>/**`).
+- **PR Pytest** — installs deps and runs `pytest -v` on Python 3.12.
+
+_CI runs tests and policy checks only — it does not lint, build, or deploy._
+Ruff/mypy/pre-commit are configured for **local** use, not enforced in CI.
+
+**Run the pipeline locally with [`act`](https://github.com/nektos/act):**
 
 ```bash
 act pull_request -e event.json -W .github/workflows/pr-controller.yml
 ```
 
-This spins up a local GitHub runner, validates the feature policy, runs the Ruff linter, and executes the Pytest suite inside the CI Docker environment.
+---
 
 ## Operations
 
-- **Stop Stack**: `docker compose down`
-- **Hard Reset (Wipe all data)**: `docker compose down -v`
+- **Stop stack**: `docker compose down`
+- **Hard reset (wipe all data)**: `docker compose down -v`
+
+Runbook: [operations.md](docs/features/data-simulator/operations.md).
