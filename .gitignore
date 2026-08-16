@@ -25,3 +25,6 @@ logs/
 # test files
 .coverage
 event.json
+
+# generated reports
+writeup/
