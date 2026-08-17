@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Writeup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* Light theme only, by decision — no dark mode, no theme button.
+     Design language borrowed from harness-kit's pattern-engineering-audit
+     report: mono uppercase section labels with a blue bar, bordered cards,
+     chips, flat 90s-tech geometry (no rounded corners, no shadows). */
+  :root{
+    --bg:#ffffff; --bg-elevated:#fafafa;
+    --line:#e5e5e5; --line-strong:#d4d4d4;
+    --ink:#171717; --ink-2:#525252; --ink-3:#a3a3a3; --mono-ink:#737373;
+    --blue:#1d4ed8; --blue-light:#eff6ff; --blue-dark:#1e40af;
+    --low:#b3392f; --low-soft:#fdf1f0;
+    --mid:#a36a1c; --mid-soft:#fdf6ea;
+    --high:#1f7a4d; --high-soft:#edf7f1;
+    --sans:Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);
+       padding:0 2rem 6rem;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:64rem;margin:0 auto}
+  a{color:var(--blue)}
+  p{color:var(--ink-2)}
+  strong{color:var(--ink);font-weight:700}
+  ul,ol{color:var(--ink-2)}
+  li{margin:.3rem 0}
+  code{font-family:var(--mono);font-size:.85em;background:var(--blue-light);
+       color:var(--blue-dark);padding:.1em .35em}
+  pre{background:var(--bg-elevated);border:1px solid var(--line);
+      padding:.85rem 1.1rem;overflow-x:auto;line-height:1.5}
+  pre code{background:none;color:var(--ink);padding:0;font-size:.82rem}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---------- header ---------- */
+  header{padding:4.5rem 0 2.8rem;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;
+          text-transform:uppercase;color:var(--mono-ink);margin:0 0 1rem;
+          display:flex;align-items:center;gap:.75rem}
+  .kicker::before{content:"";width:2rem;height:3px;background:var(--blue)}
+  h1{font-weight:800;letter-spacing:-.03em;line-height:1.15;
+     font-size:clamp(1.5rem,2.8vw,2.2rem);margin:0;max-width:38ch;text-wrap:balance}
+  h1 em{font-style:normal;color:var(--blue)}
+  .headmeta{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1.4rem}
+  .chip{font-family:var(--mono);font-size:.72rem;border:1px solid var(--line-strong);
+        background:var(--bg);padding:.3rem .75rem;color:var(--ink-2)}
+  .chip strong{color:var(--ink);font-weight:600}
+
+  /* ---------- sections ---------- */
+  section{padding:3rem 0 0}
+  h2.label{display:flex;align-items:center;gap:.75rem;margin:0 0 1.4rem;
+     font-family:var(--mono);font-size:.72rem;font-weight:600;
+     letter-spacing:.08em;text-transform:uppercase;color:var(--mono-ink)}
+  h2.label::before{content:"";width:2rem;height:3px;background:var(--blue)}
+  h3{margin:1.6rem 0 .5rem;font-size:1.02rem;font-weight:700;letter-spacing:-.01em}
+
+  /* ---------- cards ---------- */
+  .card{background:var(--bg);border:1px solid var(--line);
+        padding:1.2rem 1.4rem;margin:0 0 .8rem}
+  .card h3{margin:0 0 .35rem}
+  .card p{margin:.2rem 0;max-width:75ch;font-size:.94rem}
+  .card .file{font-family:var(--mono);font-size:.72rem;color:var(--mono-ink);
+        letter-spacing:.03em;margin:0 0 .4rem;display:block}
+
+  /* ---------- numbered walk (steps) ---------- */
+  ol.walk{margin:0;padding:0;list-style:none;counter-reset:st}
+  ol.walk li{counter-increment:st;display:flex;gap:1.1rem;align-items:baseline;
+             background:var(--bg);border:1px solid var(--line);
+             padding:.95rem 1.2rem;margin-bottom:.55rem;font-size:.95rem}
+  ol.walk li::before{content:counter(st,decimal-leading-zero);font-family:var(--mono);
+             font-weight:700;font-size:1.1rem;color:var(--blue);min-width:1.8rem}
+  ol.walk li>div{color:var(--ink-2)}
+  ol.walk li>div strong{color:var(--ink)}
+
+  /* ---------- status tags ---------- */
+  .tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;
+       text-transform:uppercase;padding:.22rem .6rem;flex-shrink:0}
+  .tag.built{background:var(--high-soft);color:var(--high)}
+  .tag.planned{background:var(--mid-soft);color:var(--mid)}
+  .tag.blue{background:var(--blue-light);color:var(--blue-dark)}
+
+  /* ---------- aside ---------- */
+  .note{background:var(--mid-soft);border-left:3px solid var(--mid);
+        padding:.85rem 1.1rem;margin:1rem 0;font-size:.9rem;color:var(--ink)}
+
+  /* ---------- command row ---------- */
+  .cmd{display:flex;gap:.5rem;align-items:center;margin:.7rem 0}
+  .cmd code{flex:1 1 auto;background:var(--bg-elevated);border:1px solid var(--line);
+        color:var(--ink);padding:.5rem .8rem;font-size:.8rem;overflow-wrap:anywhere}
+  .btn{background:var(--bg);border:1px solid var(--line-strong);
+       padding:.45rem .8rem;cursor:pointer;font:600 .72rem var(--mono);
+       letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2)}
+  .btn:hover{border-color:var(--blue);color:var(--blue)}
+
+  /* ---------- tables ---------- */
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);margin:.7rem 0}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;background:var(--bg)}
+  th,td{text-align:left;padding:.65rem .9rem;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  th{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;
+     text-transform:uppercase;color:var(--mono-ink);font-weight:600}
+  td:first-child code{background:none;color:var(--ink);padding:0}
+
+  /* ---------- accordion ---------- */
+  details.fold{background:var(--bg);border:1px solid var(--line);margin:0 0 .55rem}
+  details.fold summary{cursor:pointer;padding:.9rem 1.2rem;font-size:.95rem;
+        color:var(--ink);list-style:none;display:flex;gap:.8rem;align-items:baseline}
+  details.fold summary::-webkit-details-marker{display:none}
+  details.fold summary::before{content:"+";font-family:var(--mono);font-weight:700;
+        color:var(--blue);min-width:1rem}
+  details.fold[open] summary::before{content:"–"}
+  details.fold summary strong{color:var(--ink)}
+  details.fold .fold-body{padding:0 1.2rem 1rem 3rem;font-size:.92rem;color:var(--ink-2)}
+  details.fold .fold-body p{max-width:75ch}
+
+  /* ---------- conformance matrix + modal ---------- */
+  table.matrix th:first-child{position:sticky;left:0;background:var(--bg-elevated)}
+  table.matrix td:first-child{position:sticky;left:0;background:var(--bg);
+        font-family:var(--mono);font-size:.8rem;white-space:nowrap}
+  table.matrix td{padding:.35rem .45rem;text-align:center}
+  .cell-btn{font:600 .66rem var(--mono);letter-spacing:.05em;text-transform:uppercase;
+        border:1px solid transparent;padding:.3rem .55rem;cursor:pointer;min-width:3.4rem}
+  .cell-btn.ok{background:var(--high-soft);color:var(--high)}
+  .cell-btn.part{background:var(--mid-soft);color:var(--mid)}
+  .cell-btn.off{background:var(--low-soft);color:var(--low)}
+  .cell-btn.na{background:var(--bg-elevated);color:var(--ink-3);cursor:default}
+  .cell-btn:not(.na):hover{border-color:currentColor}
+  dialog.cell-modal{border:1px solid var(--line-strong);padding:0;max-width:34rem;
+        width:calc(100vw - 4rem)}
+  dialog.cell-modal::backdrop{background:rgba(0,0,0,.35)}
+  dialog.cell-modal .modal-head{display:flex;justify-content:space-between;gap:1rem;
+        align-items:baseline;padding:1rem 1.3rem;border-bottom:1px solid var(--line);
+        font-family:var(--mono);font-size:.78rem;color:var(--mono-ink)}
+  dialog.cell-modal .modal-body{padding:1rem 1.3rem 1.3rem;font-size:.93rem;
+        color:var(--ink-2);line-height:1.6}
+  dialog.cell-modal .btn{flex-shrink:0}
+
+  /* ---------- foot ---------- */
+  .foot{border-top:1px solid var(--line);padding-top:1.1rem;margin-top:3.5rem;
+        font-size:.76rem;color:var(--ink-3);font-family:var(--mono);line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- CONTENT -->
+
+<div class="foot">HOW-THIS-WAS-MADE</div>
+</div>
+
+<dialog class="cell-modal">
+  <div class="modal-head"><span class="modal-title"></span>
+    <button class="btn modal-close">Close</button></div>
+  <div class="modal-body"></div>
+</dialog>
+
+<script>
+(function () {
+  // One listener for every Copy button, so a new command row needs no script.
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest(".cmd .btn");
+    if (!b) return;
+    var code = b.parentElement.querySelector("code");
+    if (!code) return;
+    navigator.clipboard.writeText(code.textContent).then(function () {
+      var was = b.textContent;
+      b.textContent = "Copied";
+      setTimeout(function () { b.textContent = was; }, 1200);
+    });
+  });
+
+  // Conformance-matrix cells: any .cell-btn with data-detail opens the one
+  // shared modal. data-title names the cell (e.g. "transfer — labware");
+  // data-detail is the self-contained explanation.
+  var modal = document.querySelector("dialog.cell-modal");
+  if (modal) {
+    document.addEventListener("click", function (e) {
+      var c = e.target.closest(".cell-btn[data-detail]");
+      if (c) {
+        modal.querySelector(".modal-title").textContent = c.dataset.title || "";
+        modal.querySelector(".modal-body").textContent = c.dataset.detail;
+        modal.showModal();
+      }
+      if (e.target.closest(".modal-close")) modal.close();
+      // click on the backdrop closes it
+      if (e.target === modal) modal.close();
+    });
+  }
+})();
+</script>
+</body>
+</html>
