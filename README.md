@@ -59,12 +59,12 @@ To roll back only the zone migration on a disposable database:
 docker compose run --rm data_simulator alembic downgrade 9b7a1e20a036
 ```
 
-### 4. Restart Simulator
+### 4. Recreate Simulator
 
-Restart the simulator to pick up the seeded data:
+Recreate the simulator to pick up the rebuilt image and seeded data:
 
 ```bash
-docker compose restart data_simulator
+docker compose up -d --force-recreate data_simulator
 ```
 
 ---
