@@ -9,5 +9,5 @@ def test_migrations_have_one_linear_head():
     assert scripts.get_heads() == ["0002_add_zone"]
     assert [revision.revision for revision in scripts.walk_revisions()] == [
         "0002_add_zone",
-        "0001_initial_schema",
+        "9b7a1e20a036",
     ]

@@ -6,7 +6,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "0002_add_zone"
-down_revision: Union[str, None] = "0001_initial_schema"
+down_revision: Union[str, None] = "9b7a1e20a036"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -41,19 +41,22 @@ docker compose run --rm data_simulator python src/seed.py --count 50
 
 _(To reset the database later, append `--clear` to the seed command)._
 
-If the database was created before Alembic was introduced, mark its existing
-schema as the baseline before upgrading. This preserves its rows while adding
+Databases migrated by the earlier `binforge` service can upgrade directly; its
+original `9b7a1e20a036` revision remains the baseline of this migration chain.
+
+If the database has the existing table but no `alembic_version` entry, mark its
+schema as that baseline before upgrading. This preserves its rows while adding
 the new columns:
 
 ```bash
-docker compose run --rm data_simulator alembic stamp 0001_initial_schema
+docker compose run --rm data_simulator alembic stamp 9b7a1e20a036
 docker compose run --rm data_simulator alembic upgrade head
 ```
 
 To roll back only the zone migration on a disposable database:
 
 ```bash
-docker compose run --rm data_simulator alembic downgrade 0001_initial_schema
+docker compose run --rm data_simulator alembic downgrade 9b7a1e20a036
 ```
 
 ### 4. Restart Simulator

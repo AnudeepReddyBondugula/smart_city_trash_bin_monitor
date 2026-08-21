@@ -1,11 +1,14 @@
-"""Create the initial smart_bins schema."""
+"""Create the initial smart_bins schema.
+
+Revision ID: 9b7a1e20a036
+"""
 
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "0001_initial_schema"
+revision: str = "9b7a1e20a036"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
