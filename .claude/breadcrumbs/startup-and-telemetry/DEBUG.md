@@ -1,52 +1,27 @@
-# Startup & Telemetry Generation — Debug Guide
+# Startup and Telemetry Generation — Debug Guide
 
-## Log locations
+Logs go to the color console and rotating `logs/simulator.log`. `SIGUSR1`
+toggles debug logging for a native process.
 
-| Layer | Log file | What's in it |
-|-------|----------|---------------|
-| data-simulator | console (color) + `logs/simulator.log` | startup, per-tick send, retries (`src/logging_config.py:37-49`) |
-
-`SIGUSR1` toggles DEBUG at runtime (`src/logging_config.py:55,60`).
-
-## What to search for
-
-| Symptom | Where to look | Search term |
-|---------|---------------|-------------|
-| No telemetry published at all | `simulation_manager.py:62-65` log line | `"Started 0 simulator"` |
-| Kafka unreachable at startup | `kafka_producer.py:33-44` | `"Kafka not ready yet"` |
-| Per-tick send silently dropped | `kafka_producer.py:61-62` | `"Failed to send telemetry"` |
-| Crash before `main()` starts | any consumer module import | pydantic `ValidationError` |
-
-## Quick commands
+| Symptom | Check |
+|---|---|
+| `Started 0 simulator(s)` | Query `smart_bins` for active rows and seed if empty. |
+| Kafka connection retries | Verify `KAFKA_BOOTSTRAP_SERVERS` for Docker versus native execution. |
+| Send failures | Search logs for `Failed to send telemetry`. Messages are dropped, not retried. |
+| Payload lacks zone or temperature | Rebuild and force-recreate the simulator container; do not judge new format with `--from-beginning`. |
+| Pydantic validation error before startup | A required PostgreSQL or Kafka environment variable is missing. |
 
 ```bash
-# Confirm ACTIVE bins exist (root cause of "no telemetry")
-cd services/data-simulator && PYTHONPATH=. python -c "
-import asyncio
-from database import AsyncSessionLocal
-from models.smart_bin import SmartBin
-from sqlalchemy import select
-async def main():
-    async with AsyncSessionLocal() as s:
-        r = await s.execute(select(SmartBin).where(SmartBin.status == 'ACTIVE'))
-        print(len(r.scalars().all()), 'active bins')
-asyncio.run(main())
-"
+docker exec smartbin_postgres psql -U postgres -d smart_city \
+  -c "SELECT status, COUNT(*) FROM smart_bins GROUP BY status;"
 
-# Tail the log for send failures
-tail -f services/data-simulator/logs/simulator.log | grep -i "kafka\|telemetry"
+docker compose build data_simulator
+docker compose up -d --force-recreate data_simulator
+
+docker exec smartbin_kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 \
+  --topic smartbin-telemetry-v1 \
+  --max-messages 2 --timeout-ms 20000
 ```
 
-## Env vars that affect this flow
-
-| Variable | Effect | Default |
-|----------|--------|---------|
-| `KAFKA_TOPIC` | topic telemetry is published to | — (required) |
-| `SIMULATION_INTERVAL` | seconds between per-bin ticks | 5 |
-| `NUMBER_OF_BINS` | declared but unused at runtime (see `../database-seeding/DEBUG.md`) | 100 |
-
-## Common breakpoints
-
-- `src/kafka_producer.py:15` `KafkaClient.start()` — Kafka connectivity issues.
-- `src/simulator/simulation_manager.py:34` `initialize()` — no/zero bins loaded.
-- `src/simulator/bin_simulator.py:118` `_run()` — per-tick simulation/publish logic.
+Runtime fleet size comes from active rows, not `NUMBER_OF_BINS`.

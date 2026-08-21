@@ -1,3 +1,8 @@
+# BinVault Design
+
+> **Status: planned.** No BinVault service is implemented in this repository.
+> This document describes intended architecture, not current runtime behavior.
+
 ## What is BinVault?
 
 **BinVault** is the **analytical storage layer** of the Smart Bin Monitoring System.

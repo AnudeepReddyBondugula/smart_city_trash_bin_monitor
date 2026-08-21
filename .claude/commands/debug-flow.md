@@ -20,7 +20,7 @@ breadcrumb folders:
 | `shutdown`, `graceful-shutdown`, `signal`            | `.claude/breadcrumbs/graceful-shutdown/` |
 | `config`, `settings`, `env`                          | `.claude/breadcrumbs/config-loading/` |
 | `seed`, `seeding`, `mock-data`                       | `.claude/breadcrumbs/database-seeding/` |
-| `create-tables`, `schema`, `migration`               | `.claude/breadcrumbs/table-creation/` |
+| `alembic`, `schema`, `migration`                     | `.claude/breadcrumbs/schema-migrations/` |
 | `ci`, `pr`, `governance`, `pipeline`, `pytest`       | `.claude/breadcrumbs/ci-pr-governance/` |
 
 Each folder has `FLOW.md` (high-level trace), `DETAILS.md` (function-level

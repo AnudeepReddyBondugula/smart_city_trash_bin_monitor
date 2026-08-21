@@ -1,6 +1,8 @@
 # Smart City Trash Bin Monitor - BinForge 🏙️
 
-Data Simulator is the data generation service for the Smart City Trash Bin Monitor. It simulates thousands of IoT trash bins concurrently and publishes real-time telemetry (fill levels, locations, timestamps) to Apache Kafka.
+Data Simulator is the data generation service for the Smart City Trash Bin
+Monitor. It runs one asynchronous simulation per active bin and publishes fill,
+battery, temperature, location, zone, and timestamp telemetry to Apache Kafka.
 
 ## Architecture
 
@@ -12,20 +14,23 @@ Data Simulator is the data generation service for the Smart City Trash Bin Monit
 
 ### 1. Environment Configuration
 
-The repository includes a template file. You must copy it to create your private `.env.docker.local` file inside the `services/data-simulator` directory:
+The repository includes a template file. Copy it to the `.env.docker` path used
+by Docker Compose:
 
 ```bash
-cp services/data-simulator/.env.local.example services/data-simulator/.env.docker.local
+test -f services/data-simulator/.env.docker || \
+  cp services/data-simulator/.env.local.example services/data-simulator/.env.docker
 ```
 
 _(Note: If you plan to run the Python script natively instead of via Docker, create a `.env.local` file instead)._
 
 ### 2. Start Infrastructure
 
-Build and start the unified Docker stack:
+Start PostgreSQL and Kafka, then build the simulator image:
 
 ```bash
-docker compose up -d --build
+docker compose up -d postgres kafka
+docker compose build data_simulator
 ```
 
 _(The simulator will not emit telemetry until the database is migrated and seeded.)_
@@ -83,41 +88,57 @@ docker logs data_simulator -f
 docker exec -it smartbin_postgres psql -U postgres -d smart_city -c "SELECT bin_id, capacity, latitude, longitude, zone, status FROM smart_bins LIMIT 10;"
 ```
 
-**Consume Live Kafka Stream:**
+**Consume two newly produced Kafka messages:**
 
 ```bash
-docker exec -it smartbin_kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic smartbin-telemetry-v1
+docker exec smartbin_kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 \
+  --topic smartbin-telemetry-v1 \
+  --max-messages 2 --timeout-ms 20000
 ```
+
+Do not add `--from-beginning` when validating the current payload schema; it
+also replays historical records created before newer fields existed.
 
 ## Testing
 
-The data simulator comes with a comprehensive `pytest` suite that tests all the core simulation logic, database schema, and Kafka integrations.
+The data simulator has pytest coverage for its models, simulation behavior,
+configuration, migration chain, database mapping, lifecycle, and Kafka client.
 
-To run the tests locally inside the running Docker container:
+Run tests locally:
 
 ```bash
-docker exec -it data_simulator pip install -r requirements-dev.txt
-docker exec -it data_simulator pytest -v
+cd services/data-simulator
+pytest -v
 ```
 
-_(This allows you to test instantly without having to rebuild the Docker image.)_
+Or reproduce the Docker test stage:
+
+```bash
+docker build --target test \
+  -t smart-city-data-simulator-test services/data-simulator
+```
 
 ## CI/CD Pipeline
 
-We enforce a strict CI/CD pipeline using GitHub Actions to ensure code quality and prevent regressions.
+GitHub Actions detects supported branch prefixes, enforces file scope for
+`feature/` branches, and runs the data-simulator pytest suite on pull requests
+to `develop`.
 
 **Feature Policy:**
 When creating a feature branch, you must name it `feature/<service>/<task>` (e.g. `feature/data-simulator/add-tests`).
 The pipeline enforces that a feature branch only modifies files within its own service directory (e.g., `services/data-simulator/`).
 
-**Local Testing with `act`:**
-You can test the GitHub Actions CI pipeline locally before pushing your code using `act`:
+**Local governance check with `act`:**
+
+This command runs the PR governance workflow only:
 
 ```bash
 act pull_request -e event.json -W .github/workflows/pr-controller.yml
 ```
 
-This spins up a local GitHub runner, validates the feature policy, runs the Ruff linter, and executes the Pytest suite inside the CI Docker environment.
+Run pytest and Ruff separately when needed; the current GitHub workflows do not
+run Ruff.
 
 ## Operations
 

@@ -1,60 +1,38 @@
 ---
-description: Create the schema and seed mock bins into Postgres.
+description: Upgrade the schema and seed mock bins into PostgreSQL.
 ---
 
 # /seed-db
 
-Initializes the `smart_bins` table and inserts mock bins so the simulator has
-`ACTIVE` bins to emit telemetry for.
+## Docker
 
-## Prerequisites
+```bash
+docker compose up -d postgres
+docker compose build data_simulator
+docker compose run --rm data_simulator alembic upgrade head
+docker compose run --rm data_simulator python src/seed.py --count 50
+docker compose up -d --force-recreate data_simulator
+```
 
-- Postgres running (via `docker compose up -d postgres` or the full stack).
-- Env vars available (sourced from `.env.local` for native, or provided by
-  `.env.docker` inside containers). See the `config` skill.
+## Native
 
-## Step 1 — create tables (idempotent)
-
-`src/create_tables.py` runs `Base.metadata.create_all`
-(`create_tables.py:5-13`). Only creates missing tables; does not alter existing
-ones.
-
-Native:
 ```bash
 cd services/data-simulator
 set -a; source .env.local; set +a
-PYTHONPATH=. python src/create_tables.py
+alembic upgrade head
+PYTHONPATH=. python src/seed.py --count 50
 ```
 
-## Step 2 — seed mock bins
+`--count` defaults to 50 and rejects values above 500. `--clear` deletes all
+existing bin rows before inserting replacements.
 
-`src/seed.py` inserts `--count` bins (default 50, max 500) with `Faker`
-coordinates, `capacity=100.0`, `status="ACTIVE"` (`seed.py:31-42`).
+New bins have capacity `100.0`, status `ACTIVE`, and one of five Hyderabad
+zones with matching coordinates. Rows that existed before the zone migration
+remain `UNASSIGNED` until replaced or explicitly updated.
 
-Native:
-```bash
-PYTHONPATH=. python src/seed.py --count 50          # add bins
-PYTHONPATH=. python src/seed.py --count 50 --clear  # wipe then re-seed
-```
-
-Docker (per `README.md:38`, `:41`):
-```bash
-docker compose run --rm data_simulator python src/seed.py --count 50
-docker compose run --rm data_simulator python src/seed.py --count 50 --clear
-```
-
-## Flags (`src/seed.py:51-59`)
-
-- `--count N` — number of bins (default 50; refuses `>500`, `seed.py:16-18`).
-- `--clear` — `DELETE FROM smart_bins` before inserting (`seed.py:26-29`).
-
-## Verify
+Verify:
 
 ```bash
-docker exec -it smartbin_postgres psql -U postgres -d smart_city \
-  -c "SELECT bin_id, capacity, latitude, longitude, status FROM smart_bins LIMIT 10;"
+docker exec smartbin_postgres psql -U postgres -d smart_city \
+  -c "SELECT bin_id, latitude, longitude, zone, status FROM smart_bins LIMIT 10;"
 ```
-(from `README.md:64`)
-
-After seeding, restart the simulator so `initialize()` reloads the fleet
-(`README.md:48`, `simulation_manager.py:34-46`).

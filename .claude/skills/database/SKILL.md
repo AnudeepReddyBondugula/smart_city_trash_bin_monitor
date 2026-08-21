@@ -1,78 +1,60 @@
 ---
 name: database
 description: >
-  Load when working on persistence — the SQLAlchemy async engine, the SmartBin
-  ORM model, schema/table creation, or seeding mock bins. Covers the async engine
-  setup, the smart_bins table, and the seed/create-tables scripts. Trigger words:
-  database, Postgres, SQLAlchemy, SmartBin, smart_bins, engine, session, seed,
-  migration, asyncpg.
+  Load for PostgreSQL, SQLAlchemy, SmartBin, Alembic migrations, async sessions,
+  or database seeding.
 ---
 
 # Database Layer
 
-PostgreSQL 15 is the persistence layer for **static bin metadata only**. Dynamic
-telemetry is not written here (it goes to Kafka). Access is fully async via
-SQLAlchemy 2.0 + `asyncpg`.
+PostgreSQL 15 stores static bin metadata. Dynamic fill, battery, and temperature
+state is kept in memory and published to Kafka.
 
-All paths below are relative to `services/data-simulator/`.
+Paths are relative to `services/data-simulator/`.
 
-## Key files
+## Sources of truth
 
-- `src/database.py` — the single source of the engine, session factory, and ORM
-  base:
-  - `Base = declarative_base()` (`:10`).
-  - `SmartBin` model (`:13`) → table `smart_bins` (`:22`).
-  - `engine = create_async_engine(settings.DATABASE_URL, echo=False)` (`:38`).
-  - `AsyncSessionLocal = async_sessionmaker(...)` (`:41`), `expire_on_commit=False`.
-- `src/create_tables.py` — creates tables via `Base.metadata.create_all`
-  (`:5-13`). Idempotent ("if not exists"). Run as a script (`:23`).
-- `src/seed.py` — CLI to insert mock bins using `Faker` (`:15`). See the
-  `seed-db` command and the `database-seeding` breadcrumb.
-- `src/config.py:19-27` — `DATABASE_URL` is a computed field:
-  `postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DB`.
+- `src/database.py`: async engine, session factory, `Base`, and `SmartBin`.
+- `alembic/env.py`: async Alembic environment using `settings.DATABASE_URL` and
+  `Base.metadata`.
+- `alembic/versions/`: ordered schema history.
+- `src/seed.py`: mock fleet creation.
 
-## The `smart_bins` schema (`src/database.py:13-34`)
+## Current schema
 
-| Column       | Type         | Notes                                             |
-| ------------ | ------------ | ------------------------------------------------- |
-| `bin_id`     | String(50)   | Primary key (`:24`)                               |
-| `capacity`   | Float        | Not null (`:25`)                                  |
-| `latitude`   | Float        | Not null (`:26`)                                  |
-| `longitude`  | Float        | Not null (`:27`)                                  |
-| `status`     | String(20)   | Not null, default `"ACTIVE"` (`:28`)              |
-| `created_at` | DateTime     | Server default `now()` (`:29-31`)                 |
-| `updated_at` | DateTime     | Server default `now()`, `onupdate=now()` (`:32`)  |
+| Column | Type | Constraint |
+|---|---|---|
+| `bin_id` | `String(50)` | Primary key |
+| `capacity` | `Float` | Not null |
+| `latitude` | `Float` | Not null |
+| `longitude` | `Float` | Not null |
+| `zone` | `String(20)` | Not null |
+| `status` | `String(20)` | Not null; Python default `ACTIVE` |
+| `created_at` | `DateTime` | Not null; server default `now()` |
+| `updated_at` | `DateTime` | Not null; server default `now()` |
 
-`status` matters: `SimulationManager.initialize()` only loads
-`status == "ACTIVE"` rows (`src/simulator/simulation_manager.py:44`).
+Only `ACTIVE` rows are loaded by `SimulationManager.initialize()`.
 
-## How to extend safely
+## Schema changes
 
-- **New column:** add a `mapped_column` to `SmartBin`, then re-run
-  `create_tables.py`. Note there are **no migrations** wired up in this service
-  (see pitfalls) — `create_all` only *adds new tables*, it does **not** alter an
-  existing table. Changing an existing column requires a manual migration or a DB
-  reset (`docker compose down -v`).
-- **New query:** use `async with AsyncSessionLocal() as session:` and
-  `await session.execute(select(...))`, mirroring
-  `simulation_manager.py:40-46`.
-- **New standalone DB script:** import `engine`/`AsyncSessionLocal` from
-  `database`, wrap work in `asyncio.run(...)`, and always `await engine.dispose()`
-  in a `finally` (pattern in `create_tables.py:16-20` and `seed.py:47-48`).
+1. Update `SmartBin`.
+2. Generate an Alembic revision: `alembic revision --autogenerate -m "..."`.
+3. Review generated upgrade and downgrade operations.
+4. Run `alembic upgrade head`, then `alembic check`.
+5. Test fresh upgrade and upgrade from the previous revision on disposable
+   PostgreSQL data.
 
-## Pitfalls (evidence in code)
+The baseline revision is intentionally `9b7a1e20a036` for compatibility with
+databases created by the former `binforge/` layout. Do not replace it with a new
+root revision.
 
-- `alembic` is listed in `requirements.txt:2` but there is **no** `alembic.ini`
-  or migrations directory in the tracked service — schema is created purely via
-  `create_tables.py` (`Base.metadata.create_all`). Treat schema evolution as
-  manual for now. (An untracked `binforge/alembic/` scratch dir exists at repo
-  root but is not part of this service.)
-- Importing `src/database.py` **instantiates the engine at import time** (`:38`),
-  which calls `get_settings()` → requires all `POSTGRES_*` env vars to be set, or
-  it raises. This is why tests set dummy env in `tests/conftest.py:6-12` before
-  importing.
-- `seed.py` refuses counts over 500 as a safety guard
-  (`src/seed.py:16-18`).
-- Host port for Postgres is **5433** (mapped to container 5432) in
-  `docker-compose.yml:8-9` — but the app connects over the Docker network on
-  `5432` via `.env.docker`. Only external tooling on the host uses 5433.
+Docker source is copied into the image, so rebuild before executing newly added
+migrations. Never stamp a database until its schema is verified to match the
+target revision.
+
+## Operational details
+
+- Importing `database.py` creates the engine and requires all settings.
+- Tests provide dummy environment variables in `tests/conftest.py`.
+- PostgreSQL is exposed on host port 5433 and reached inside Compose on 5432.
+- `seed.py` refuses counts over 500 and always disposes its private engine.

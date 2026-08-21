@@ -1,61 +1,39 @@
-## Purpose
+# Docker Compose
 
-This file defines and manages multi-container Docker applications. It specifies services, networks, and volumes so you can run your entire stack with a single command.
+The root `docker-compose.yml` runs three services:
 
-## Usage
+- `postgres`: PostgreSQL 15 with persistent `postgres_data` and host port 5433.
+- `kafka`: Confluent Kafka 7.4.1 in single-node KRaft mode, exposed on 9092.
+- `data_simulator`: the Python simulator built from `services/data-simulator/`.
 
-1. Ensure Docker and Docker Compose are installed.
-2. Place the `docker-compose.yml` file in your project root.
-3. Run:
-    
-    `docker-compose up -d`
-    
-    for executing after changes in the code run:
-    
-    `docker-compose up -d —build`
-    
-    This starts all services in detached mode.
-    
-4. To stop services:
-    
-    `docker-compose down`
-    
+Both PostgreSQL and the simulator read
+`services/data-simulator/.env.docker`. Create it from the tracked template:
 
-## Structure
+```bash
+test -f services/data-simulator/.env.docker || \
+  cp services/data-simulator/.env.local.example services/data-simulator/.env.docker
+```
 
-A typical `docker-compose.yml` file contains:
+## Start and initialize
 
-`version: "3.9"
+```bash
+docker compose up -d postgres kafka
+docker compose build data_simulator
+docker compose run --rm data_simulator alembic upgrade head
+docker compose run --rm data_simulator python src/seed.py --count 50
+docker compose up -d --force-recreate data_simulator
+```
 
-services:
-  web:
-    build: .
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
+`docker compose restart data_simulator` does not adopt a newly built image.
+Use `up -d --force-recreate` after source or migration changes.
 
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydb
-    volumes:
-      - db_data:/var/lib/postgresql/data
+## Inspect and stop
 
-volumes:
-  db_data:`
+```bash
+docker compose ps
+docker compose logs -f data_simulator
+docker compose down
+```
 
-### Sections
-
-- **version**: Compose file format version.
-- **services**: Defines containers (e.g., `web`, `db`).
-- **volumes**: Persistent storage for data.
-- **networks** (optional): Custom networking between services.
-
-## Common Commands
-
-- `docker-compose ps` → List running services.
-- `docker-compose logs -f` → Stream logs.
-- `docker-compose exec -it <service> bash` → Open shell inside a container.
+`docker compose down -v` also deletes PostgreSQL data and should only be used
+when a full reset is intended.
