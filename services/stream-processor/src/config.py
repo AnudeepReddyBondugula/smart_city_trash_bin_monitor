@@ -133,16 +133,18 @@ class Settings(BaseSettings):
         services build their view of the payload from one file.
         """
         service_root = Path(__file__).resolve().parents[1]
-        candidates = (
-            service_root / "contracts" / "telemetry-v1.json",
-            service_root.parents[1] / "contracts" / "telemetry-v1.json",
-        )
-        for candidate in candidates:
+
+        # Walk upwards rather than naming fixed candidates, because the layout
+        # differs: in the image the contract sits beside the service at /app,
+        # while in the repository it is two levels up at the root. Searching
+        # upwards covers both without either having to know about the other.
+        for base in (service_root, *service_root.parents):
+            candidate = base / "contracts" / "telemetry-v1.json"
             if candidate.is_file():
                 return candidate
+
         raise FileNotFoundError(
-            f"telemetry contract not found, looked in: "
-            f"{', '.join(str(c) for c in candidates)}"
+            f"telemetry contract not found searching upwards from {service_root}"
         )
 
     def checkpoint_for(self, query_name: str) -> str:

@@ -4,12 +4,13 @@
 # The build context is the repository root, not this directory, so the shared
 # telemetry contract can be copied in. Both services build their view of the
 # payload from that one file.
-FROM python:3.11-slim AS base
+FROM python:3.11-slim-bookworm AS base
 
 WORKDIR /app
 
 # Spark runs on the JVM even when driven from Python, and local mode still
-# starts one in-process.
+# starts one in-process. Spark 3.5 supports Java 8, 11 and 17 - not 21 - which
+# is why the base image is pinned to bookworm; trixie dropped the 17 packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-17-jre-headless \
     curl \
@@ -19,7 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/app:/app/src
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+# JAVA_HOME is deliberately unset: Spark falls back to java on PATH, which
+# avoids hardcoding a path that differs between amd64 and arm64.
 
 COPY services/stream-processor/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

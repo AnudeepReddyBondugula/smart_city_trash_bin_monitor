@@ -58,15 +58,22 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    command: >
-      bash -c "
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists
-        --topic smartbin-telemetry-v1 --partitions 12 --replication-factor 1 &&
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists
-        --topic smartbin-telemetry-dlq --partitions 3 --replication-factor 1 &&
-      echo 'Topics ready:' &&
-      kafka-topics --bootstrap-server kafka:29092 --list
-      "
+    # Note --if-not-exists leaves an existing topic alone, partition count
+    # included. A topic auto-created earlier with one partition therefore stays
+    # at one: adding partitions later would change which partition a bin's key
+    # hashes to, breaking the per-bin ordering the stateful query depends on.
+    # Delete the topic and let this recreate it. The describe at the end prints
+    # what the topics actually are, so a stale one is visible rather than
+    # assumed.
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic smartbin-telemetry-v1 --partitions 12 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic smartbin-telemetry-dlq --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:29092 --describe --topic smartbin-telemetry-v1 | head -1
+        kafka-topics --bootstrap-server kafka:29092 --describe --topic smartbin-telemetry-dlq | head -1
     restart: "no"
 
   data_simulator:

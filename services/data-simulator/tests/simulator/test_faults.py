@@ -79,13 +79,43 @@ def test_assign_fault_modes_can_be_disabled():
 # --------------------------------------------------------------------------
 
 
+def test_silent_bin_reports_before_it_dies():
+    """A silent bin is heard from first, then stops.
+
+    It has to report at least once. Dead-device detection arms a timer when a
+    bin reports and fires when that timer expires, so a bin that has never been
+    heard from cannot be reported as lost - nothing downstream knows it exists,
+    and the alert would never fire on a freshly started stack.
+    """
+    simulator = BinSimulator(make_bin("SILENT"))
+
+    first = simulator._next_payload()
+
+    assert first is not None
+    assert first["bin_id"] == "bin_1"
+
+
+def test_silent_bin_goes_quiet_after_its_first_readings():
+    """Having reported, it then stops - which is what detection notices."""
+    simulator = BinSimulator(make_bin("SILENT"))
+
+    published = [
+        simulator._next_payload()
+        for _ in range(settings.SILENCE_AFTER_READINGS + 5)
+    ]
+
+    assert all(payload is not None for payload in published[: settings.SILENCE_AFTER_READINGS])
+    assert all(payload is None for payload in published[settings.SILENCE_AFTER_READINGS :])
+
+
 @pytest.mark.asyncio
 @patch("src.simulator.bin_simulator.kafka_client")
 @patch("src.simulator.bin_simulator.asyncio.sleep")
-async def test_silent_bin_publishes_nothing(mock_sleep, mock_kafka_client):
-    """A silent bin stops sending, which is what dead-device detection sees."""
+async def test_a_dead_bin_publishes_nothing(mock_sleep, mock_kafka_client):
+    """Once silent, the loop runs but sends nothing at all."""
     mock_kafka_client.send_telemetry = AsyncMock()
     simulator = BinSimulator(make_bin("SILENT"))
+    simulator._published = settings.SILENCE_AFTER_READINGS
     simulator._running = True
 
     async def stop(*args, **kwargs):

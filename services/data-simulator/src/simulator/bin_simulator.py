@@ -127,6 +127,10 @@ class BinSimulator:
         # not a duplicate at all and would silently pass straight through.
         self._last_payload: dict | None = None
 
+        # How many readings this bin has published, used by the SILENT fault to
+        # report for a while before dying.
+        self._published = 0
+
     def start(self) -> None:
         """
         Starts the telemetry simulation task.
@@ -231,12 +235,18 @@ class BinSimulator:
         Returns:
             The telemetry payload, or None if this bin is currently silent.
         """
+        # A silent bin reports for a while and then dies, rather than never
+        # reporting at all. Dead-device detection arms a timer when a bin
+        # reports and raises the alert when that timer expires, so a bin that
+        # has never once been heard from cannot be reported as lost - nothing
+        # downstream knows it exists.
         if self.bin.fault_mode == "SILENT":
-            logger.debug(
-                "Bin '%s' is silent; publishing nothing.",
-                self.bin.bin_id,
-            )
-            return None
+            if self._published >= settings.SILENCE_AFTER_READINGS:
+                logger.debug(
+                    "Bin '%s' has gone silent; publishing nothing.",
+                    self.bin.bin_id,
+                )
+                return None
 
         # Re-send the previous event byte for byte, original timestamp included.
         # Alternating means a duplicate is always followed by a fresh reading,
@@ -249,9 +259,11 @@ class BinSimulator:
                 "Bin '%s' is re-sending its previous event.",
                 self.bin.bin_id,
             )
+            self._published += 1
             return duplicate
 
         self._last_payload = self.bin.to_payload()
+        self._published += 1
         return self._last_payload
 
     def _simulate(self) -> None:

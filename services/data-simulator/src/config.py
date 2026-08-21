@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # stuck-sensor, duplicate and fire-risk detectors have nothing to detect.
     FAULT_INJECTION_RATE: float = 0.12
 
+    # How many readings a bin with the SILENT fault sends before going quiet.
+    #
+    # It has to send some. Dead-device detection works by arming a timer when a
+    # bin reports and firing when the timer expires, so a bin that never reports
+    # at all is not detected as dead - it is simply never known about, and no
+    # alert can be raised for a device nothing has ever heard from. A device
+    # that reports and then dies is also the realistic failure.
+    SILENCE_AFTER_READINGS: int = 10
+
     @computed_field
     @property
     def DATABASE_URL(self) -> str:
