@@ -1,5 +1,7 @@
 import asyncio
+import configparser
 import os
+from pathlib import Path
 
 import asyncpg
 import pytest
@@ -19,6 +21,37 @@ def test_migrations_have_one_linear_head():
         "0002_add_zone",
         "9b7a1e20a036",
     ]
+
+
+def test_migrations_are_not_silent():
+    """Alembic is configured to report the revisions it applies.
+
+    Without these sections an upgrade runs in total silence: no "Running
+    upgrade" line and no confirmation of which revision was applied. A migration
+    that silently did nothing then looks identical to one that worked, on the
+    one command whose whole job is changing the shape of the database.
+    """
+    parser = configparser.ConfigParser()
+    parser.read("alembic.ini")
+
+    for section in ("loggers", "handlers", "formatters", "logger_alembic"):
+        assert parser.has_section(section), f"alembic.ini lost [{section}]"
+
+    assert parser.get("logger_alembic", "level") == "INFO"
+
+
+def test_env_loads_the_logging_configuration():
+    """The ini sections are useless unless env.py actually applies them.
+
+    Configuring logging is opt-in: Alembic does not read those sections by
+    itself, so this is the other half of the same fix.
+    """
+    env = Path("alembic/env.py").read_text()
+
+    assert "fileConfig" in env
+    # Tearing down existing loggers would silence pytest's own logging partway
+    # through a run, since this file is executed by the integration test below.
+    assert "disable_existing_loggers=False" in env
 
 
 @pytest.mark.skipif(

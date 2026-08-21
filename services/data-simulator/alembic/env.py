@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
@@ -13,6 +14,17 @@ from config import get_settings  # noqa: E402
 from database import Base  # noqa: E402
 
 config = context.config
+
+# Configure logging from alembic.ini, so an upgrade reports which revisions it
+# applied instead of running in silence.
+#
+# disable_existing_loggers is off deliberately. The default would tear down
+# every logger already configured in the process, which matters because this
+# file is executed inside the test suite by `command.upgrade` - the default
+# would silence pytest's own logging partway through a run.
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+
 if not config.get_main_option("sqlalchemy.url"):
     config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL.replace("%", "%%"))
 target_metadata = Base.metadata
