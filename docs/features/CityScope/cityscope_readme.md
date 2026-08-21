@@ -1,8 +1,12 @@
 # Frontend Documentation
 
+> **Status: planned.** No CityScope frontend is implemented in this repository.
+> The components and routes below describe the intended application.
+
 ## Overview
 
-The frontend is a **Next.js  (App Router) + React** application that provides a decision-oriented dashboard for monitoring ward-level waste bin fill levels, alerts, and analytics. It consumes APIs exposed by the backend (`/alerts/wards`, `/wards/latest`, `/wards/risk_analysis`) and renders interactive UI components.
+The planned frontend is a **Next.js (App Router) + React** application for
+monitoring ward-level waste bin fill levels, alerts, and analytics.
 
 ## Tech Stack
 

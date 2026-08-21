@@ -1,44 +1,31 @@
 # Database Seeding — Debug Guide
 
-## Log locations
+Seed errors print to the invoking terminal rather than `logging_config`.
 
-Seed errors are `print`ed, not logged through `logging_config` — check the
-CLI's stdout/stderr directly.
+| Symptom | Check |
+|---|---|
+| `relation "smart_bins" does not exist` | Run `alembic upgrade head`; see `schema-migrations/DEBUG.md`. |
+| Missing `zone` column | Rebuild the Docker image and run migrations to head. |
+| More than 500 requested | The safety guard returns before connecting. |
+| New bins do not appear in telemetry | Recreate/restart the simulator after seeding; it loads rows only at startup. |
+| Old bins have `UNASSIGNED` | Expected for rows backfilled by migration `0002_add_zone`; reseed if geographic zones are required. |
 
-## What to search for
-
-| Symptom | Where to look | Search term |
-|---------|---------------|-------------|
-| Seed crashes with DB error | `src/seed.py:45-46` | `except Exception` block, printed message |
-| Table doesn't exist error | run `create_tables.py` first — see `../table-creation/DEBUG.md` | `relation "smart_bins" does not exist` |
-| `count > 500` silently no-ops | `src/seed.py:16-18` | safety guard returns early, no rows inserted |
-| No telemetry after seeding | confirm `status == "ACTIVE"` on rows, see `../startup-and-telemetry/DEBUG.md` | — |
-
-## Quick commands
+Native:
 
 ```bash
 cd services/data-simulator
 set -a; source .env.local; set +a
+alembic upgrade head
 PYTHONPATH=. python src/seed.py --count 50
-PYTHONPATH=. python src/seed.py --count 50 --clear   # wipe then reseed
 ```
 
-## Env vars that affect this flow
+Docker:
 
-| Variable | Effect | Default |
-|----------|--------|---------|
-| `POSTGRES_*` | forms `DATABASE_URL` seed.py connects with | none (required) |
+```bash
+docker compose build data_simulator
+docker compose run --rm data_simulator alembic upgrade head
+docker compose run --rm data_simulator python src/seed.py --count 50
+docker compose up -d --force-recreate data_simulator
+```
 
-`NUMBER_OF_BINS` (`src/config.py:16`) is declared but **not** read by
-`seed.py` — fleet size comes only from `--count`.
-
-## Common breakpoints
-
-- `src/seed.py:16` safety guard — confirm `count` isn't being silently rejected.
-- `src/seed.py:31` row-generation loop — confirm `status="ACTIVE"` is set.
-- `src/seed.py:45` `except Exception` — catches and prints any DB error.
-
-## Relationship to other flows
-
-Table must already exist — run `create_tables.py` first (`../table-creation/`).
-Seeding does not create the schema.
+`--clear` deletes all existing bin rows before inserting replacements.

@@ -26,10 +26,11 @@ using this service's actual logging and error-handling patterns.
     (`src/kafka_producer.py:42-44`).
 - **Shutdown cleanup errors** are caught and logged as warnings, per step
   (`src/main.py:53-66`).
-- **Simulator cancellation** logs a warning (`src/bin_simulator.py:108-111`).
+- **Simulator cancellation** logs a warning in
+  `src/simulator/bin_simulator.py`.
 - **Config errors** surface as pydantic `ValidationError` at first
   `get_settings()` (`src/config.py:33`) — usually a missing env var.
-- **Seed errors** are caught and `print`ed, not logged (`src/seed.py:45-46`).
+- **Seed errors** are caught and printed to the invoking terminal, not logged.
 
 ## Steps
 

@@ -5,7 +5,7 @@ from src.simulator.bin_simulator import BinSimulator
 
 @pytest.fixture
 def bin_instance():
-    return Bin("bin_1", 100.0, 10.0, 20.0)
+    return Bin("bin_1", 100.0, 10.0, 20.0, "NORTH")
 
 @pytest.mark.asyncio
 async def test_start_and_stop(bin_instance):
@@ -58,8 +58,9 @@ async def test_start_already_running(bin_instance, caplog):
     
     await simulator.stop()
 
+@patch('src.simulator.bin_simulator.uniform', return_value=0.5)
 @patch('src.simulator.bin_simulator.fake')
-def test_simulate_normal_behavior(mock_fake, bin_instance):
+def test_simulate_normal_behavior(mock_fake, mock_uniform, bin_instance):
     """
     Test the _simulate method during standard operation.
     Validates that the bin's fill level appropriately increases and the battery
@@ -71,12 +72,13 @@ def test_simulate_normal_behavior(mock_fake, bin_instance):
     
     # Not emptying the bin
     mock_fake.boolean.return_value = False
-    mock_fake.pyfloat.side_effect = [5.0, 0.1] # increase in fill, decrease in battery
+    mock_fake.pyfloat.side_effect = [5.0, 0.1]
     
     simulator._simulate()
     
     assert bin_instance.current_fill_level == 55.0
     assert bin_instance.battery_level == 79.9
+    assert bin_instance.temperature == 25.5
 
 @patch('src.simulator.bin_simulator.fake')
 def test_simulate_empty_bin(mock_fake, bin_instance):
@@ -90,7 +92,7 @@ def test_simulate_empty_bin(mock_fake, bin_instance):
     
     # Emptying the bin
     mock_fake.boolean.return_value = True
-    mock_fake.pyfloat.return_value = 0.1 # decrease in battery
+    mock_fake.pyfloat.return_value = 0.1
     
     simulator._simulate()
     
@@ -135,7 +137,7 @@ def test_simulate_reaches_capacity(mock_fake, bin_instance):
     bin_instance.capacity = 100.0
     
     mock_fake.boolean.return_value = False
-    mock_fake.pyfloat.side_effect = [5.0, 0.1] # increase pushes to 103
+    mock_fake.pyfloat.side_effect = [5.0, 0.1]
     
     simulator._simulate()
     
@@ -150,8 +152,28 @@ def test_simulate_battery_depletion(mock_fake, bin_instance):
     bin_instance.battery_level = 0.05
     
     mock_fake.boolean.return_value = False
-    mock_fake.pyfloat.side_effect = [5.0, 0.1] # decrease pushes to -0.05
+    mock_fake.pyfloat.side_effect = [5.0, 0.1]
     
     simulator._simulate()
     
     assert bin_instance.battery_level == 0.0
+
+
+@pytest.mark.parametrize(
+    ("starting_temperature", "change", "expected"),
+    [(34.8, 0.5, 35.0), (20.2, -0.5, 20.0)],
+)
+@patch('src.simulator.bin_simulator.uniform')
+@patch('src.simulator.bin_simulator.fake')
+def test_simulate_clamps_temperature(
+    mock_fake, mock_uniform, bin_instance, starting_temperature, change, expected
+):
+    """Temperature remains inside the supported Celsius range."""
+    bin_instance.temperature = starting_temperature
+    mock_fake.boolean.return_value = False
+    mock_fake.pyfloat.side_effect = [1.0, 0.1]
+    mock_uniform.return_value = change
+
+    BinSimulator(bin_instance)._simulate()
+
+    assert bin_instance.temperature == expected

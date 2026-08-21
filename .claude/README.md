@@ -1,120 +1,94 @@
-# `.claude/` — Onboarding & debugging index
+# `.claude/` — Onboarding and debugging index
 
-This directory helps Claude Code sessions (and humans) onboard fast and debug the
-**Smart City Trash Bin Monitor**. Every claim in these files is backed by a file
-that was actually read; non-trivial claims cite `path:line`.
+This directory documents the implemented Smart City Trash Bin Monitor code.
+Claims about future services in `docs/features/` are design intent, not runtime
+behavior.
 
-## What this repo actually is (today)
+## Current implementation
 
-- **One implemented service:** `services/data-simulator/` — a Python 3.12 AsyncIO
-  app that simulates a fleet of IoT trash bins and publishes telemetry to Kafka.
-  Static bin metadata lives in PostgreSQL.
-- **Infra:** `docker-compose.yml` at the repo root runs Postgres 15, Kafka
-  (KRaft, single node), and the simulator.
-- **Docs:** `docs/features/` contains a *planned* multi-service architecture
-  (BinVault storage, Spark processing, APIs, dashboards). **Only the
-  data-simulator exists in code so far** — treat the rest of `docs/features/` as
-  design intent, not implemented behavior.
-- **`binforge/` at repo root is untracked local scratch** (only env files +
-  empty `__pycache__` dirs; `git ls-files binforge/` is empty). Ignore it — the
-  real code is under `services/data-simulator/`. The README's "BinForge" name is
-  the project's branding for the simulator.
+- `services/data-simulator/` is the only implemented service. It is a Python
+  3.12 AsyncIO application that loads static bin metadata from PostgreSQL and
+  publishes simulated telemetry to Kafka.
+- `docker-compose.yml` runs PostgreSQL 15, Kafka in single-node KRaft mode, and
+  the simulator.
+- Root `binforge/` content is ignored local scratch. The tracked implementation
+  lives under `services/data-simulator/`.
 
 ## Start here
 
-**Run the app (hybrid local — infra in Docker, app native):**
+Full Docker:
+
+```bash
+test -f services/data-simulator/.env.docker || \
+  cp services/data-simulator/.env.local.example services/data-simulator/.env.docker
+docker compose up -d postgres kafka
+docker compose build data_simulator
+docker compose run --rm data_simulator alembic upgrade head
+docker compose run --rm data_simulator python src/seed.py --count 50
+docker compose up -d --force-recreate data_simulator
+```
+
+Hybrid local:
+
 ```bash
 cd services/data-simulator
-cp .env.local.example .env.local          # first time only
-pip install -r requirements.txt
+cp .env.local.example .env.local
+pip install -r requirements-dev.txt
+set -a; source .env.local; set +a
+alembic upgrade head
+PYTHONPATH=. python src/seed.py --count 50
 ./scripts/run_local.sh
 ```
-Then, first time, create schema + seed bins (the simulator emits nothing without
-`ACTIVE` bins):
-```bash
-set -a; source .env.local; set +a
-PYTHONPATH=. python src/create_tables.py
-PYTHONPATH=. python src/seed.py --count 50
-```
-Full-Docker alternative: `docker compose up -d --build` then seed (see
-`README.md` at repo root, lines 23-49). More detail: `commands/run-local.md`.
 
-**Run tests (same as CI):**
+Tests:
+
 ```bash
 cd services/data-simulator
-PYTHONPATH=src pytest -v
+pytest -q
 ```
-More: `commands/run-tests.md`.
 
-**Where things live:**
-- Config / env vars: `services/data-simulator/src/config.py` +
-  `.env.local.example` / `.env.docker`. The app does **not** load `.env` itself —
-  run scripts / Docker do. See `skills/config/SKILL.md`.
-- Logs: console (color) + rotating `services/data-simulator/logs/simulator.log`
-  (`src/logging_config.py:41-46`). `SIGUSR1` toggles DEBUG at runtime
-  (`src/logging_config.py:55`).
-- Entry point: `services/data-simulator/src/main.py`.
+## Skills
 
-## Skills (`.claude/skills/<name>/SKILL.md`, registry: `skills/index.md`)
+| Skill | Use it for |
+|---|---|
+| `follow-breadcrumb` | Trace an existing documented flow. |
+| `breadcrumb-creator` | Add or repair a flow breadcrumb. |
+| `simulation-engine` | Bin state, simulator tasks, manager, and telemetry. |
+| `database` | SQLAlchemy, Alembic, `smart_bins`, and seeding. |
+| `kafka` | Producer lifecycle, payloads, and broker configuration. |
+| `config` | Settings, environment variables, and database URL construction. |
+| `testing` | Pytest fixtures, mocks, and commands. |
+| `ci-cd` | GitHub Actions and branch policy. |
 
-| Skill | Load it when… |
-| ----- | ------------- |
-| `follow-breadcrumb` | Understanding an existing flow — reads the breadcrumb index before exploring code. |
-| `breadcrumb-creator` | Documenting a flow that isn't covered yet — writes the FLOW/DETAILS/DEBUG triad. |
-| `simulation-engine` | Working on `Bin`, `BinSimulator`, `SimulationManager`, the tick loop, or telemetry generation. |
-| `database` | Working on the SQLAlchemy async engine, `SmartBin`/`smart_bins`, schema creation, or seeding. |
-| `kafka` | Working on the `KafkaClient` producer, message format/keys, retries, or the broker config. |
-| `config` | Working on `Settings`/`get_settings()`, env vars, `DATABASE_URL`, or `.env` files. |
-| `testing` | Writing/running/debugging pytest tests, fixtures, mocks, or the docstring hooks. |
-| `ci-cd` | Working on GitHub Actions, branch naming, or the PR governance/scope rules. |
+## Commands
 
-## Commands (`.claude/commands/<name>.md`)
+| Command | Purpose |
+|---|---|
+| `/run-tests` | Run the simulator test suite as CI does. |
+| `/run-local` | Run Docker infrastructure with a native simulator process. |
+| `/seed-db` | Upgrade the schema and seed bins. |
+| `/debug-flow <flow>` | Follow a breadcrumb with verified source references. |
+| `/trace-error <error>` | Locate an error using repository logging patterns. |
+| `/new-test <path>` | Add a test matching existing conventions. |
 
-| Command | Does |
-| ------- | ---- |
-| `/run-tests` | Runs the pytest suite exactly as CI does (`PYTHONPATH=src pytest -v`). |
-| `/run-local` | Starts Dockerized Postgres+Kafka and runs the simulator natively. |
-| `/seed-db` | Creates the schema (`create_tables.py`) and seeds mock bins (`seed.py`). |
-| `/debug-flow <flow>` | Walks a named flow hop-by-hop with `file:line`, via the breadcrumbs. |
-| `/trace-error <err>` | Locates an error's source using this repo's logging patterns. |
-| `/new-test <src path>` | Scaffolds a pytest test mirroring existing conventions. |
+## Breadcrumbs
 
-## Breadcrumbs (`.claude/breadcrumbs/<flow>/{FLOW,DETAILS,DEBUG}.md`)
+- `startup-and-telemetry/`
+- `graceful-shutdown/`
+- `config-loading/`
+- `schema-migrations/`
+- `database-seeding/`
+- `ci-pr-governance/`
 
-Step-by-step, `file:line`-verified traces. Index + symptom lookup:
-`breadcrumbs/_INDEX.md`.
+See `breadcrumbs/_INDEX.md` for flow and symptom routing.
 
-| Flow | Folder |
-| ---- | ------ |
-| Startup → per-bin simulation → Kafka publish | `startup-and-telemetry/` |
-| SIGINT/SIGTERM graceful shutdown & cleanup | `graceful-shutdown/` |
-| Env → `get_settings()` → `DATABASE_URL` | `config-loading/` |
-| `seed.py` CLI → `smart_bins` rows | `database-seeding/` |
-| `create_tables.py` → `metadata.create_all` | `table-creation/` |
-| PR → branch detect → feature-policy / pytest | `ci-pr-governance/` |
+## Known intentional gaps
 
-## Unverified / flagged for human confirmation
-
-These were noted while writing the docs; a maintainer should confirm intent:
-
-1. **`alembic` is a dependency without migrations.** Listed in
-   `requirements.txt:2` but there is no `alembic.ini` or migrations dir in the
-   tracked service — schema is created only by `create_tables.py`. Is Alembic
-   intended to be adopted, or should it be dropped? (An untracked
-   `binforge/alembic/` scratch dir exists but isn't part of the service.)
-2. **`NUMBER_OF_BINS` is declared but unused at runtime.** `src/config.py:16`,
-   tested in `tests/test_config.py`, but no runtime code reads it — fleet size
-   comes from `ACTIVE` DB rows and `seed.py --count`. Intentional placeholder?
-3. **`SimulationManager.add_bin`/`remove_bin`/`update_bin` are never called.**
-   The `#!` comment at `src/simulator/simulation_manager.py:67` says they await a
-   future FastAPI layer. Confirmed dead-until-then, not a bug.
-4. **Governance only enforces `feature/` branches.** `devops`/`platform`/`bugfix`
-   job calls are commented out in `pr-controller.yml:55-82`, so those branch
-   types get scope-detected but not scope-enforced. Confirm this is intended.
-5. **CI targets `develop`, not `master`.** Both PR workflows trigger only on PRs
-   to `develop` (`pr-pytest.yml:5`, `pr-controller.yml:5`); the default branch is
-   `master`. Confirm the intended integration branch.
-6. **README seeding vs. schema creation.** `README.md` seeds directly and doesn't
-   mention `create_tables.py`; on a truly empty DB you generally need
-   `create_tables.py` first. Confirm whether something else creates the schema in
-   the Docker path.
+- `NUMBER_OF_BINS` is configured and tested but runtime fleet size comes from
+  active database rows and `seed.py --count`.
+- `SimulationManager.add_bin`, `remove_bin`, and `update_bin` are not connected
+  to an API yet.
+- PR scope enforcement currently runs only for `feature/` branches; the
+  controller recognizes other prefixes but their policy jobs are commented out.
+- CI targets pull requests to `develop`, while the GitHub default branch is
+  `master`.

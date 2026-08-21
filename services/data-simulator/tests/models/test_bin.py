@@ -5,7 +5,7 @@ from datetime import datetime
 @pytest.fixture
 def bin_instance():
     """Provides a fresh Bin instance for each test."""
-    return Bin("bin_1", 100.0, 10.0, 20.0)
+    return Bin("bin_1", 100.0, 10.0, 20.0, "NORTH")
 
 def test_bin_initialization(bin_instance):
     """
@@ -17,8 +17,10 @@ def test_bin_initialization(bin_instance):
     assert bin_instance.capacity == 100.0
     assert bin_instance.latitude == 10.0
     assert bin_instance.longitude == 20.0
+    assert bin_instance.zone == "NORTH"
     assert bin_instance.current_fill_level == 0.0
     assert bin_instance.battery_level == 100.0
+    assert bin_instance.temperature == 25.0
 
 def test_update_location(bin_instance):
     """
@@ -44,8 +46,10 @@ def test_to_payload(bin_instance):
     assert payload["capacity"] == 100.0
     assert payload["current_fill_level"] == 50.12
     assert payload["battery_level"] == 80.46
+    assert payload["temperature"] == 25.0
     assert payload["latitude"] == 10.0
     assert payload["longitude"] == 20.0
+    assert payload["zone"] == "NORTH"
     
     # check timestamp is iso format
     timestamp = payload.get("timestamp")

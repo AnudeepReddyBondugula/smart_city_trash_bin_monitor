@@ -12,13 +12,15 @@ def test_smart_bin_model():
         bin_id="bin_db_1",
         capacity=100.0,
         latitude=10.0,
-        longitude=20.0
+        longitude=20.0,
+        zone="NORTH",
     )
     
     assert bin_instance.bin_id == "bin_db_1"
     assert bin_instance.capacity == 100.0
     assert bin_instance.latitude == 10.0
     assert bin_instance.longitude == 20.0
+    assert bin_instance.zone == "NORTH"
 
 
 def test_tablename_is_smart_bins():
@@ -70,10 +72,14 @@ def test_smart_bin_model_columns():
     assert "capacity" in columns
     assert "latitude" in columns
     assert "longitude" in columns
+    assert "zone" in columns
     assert "status" in columns
     
     # Verify constraints/defaults statically
     assert columns["capacity"].nullable is False
+    assert columns["zone"].nullable is False
+    assert isinstance(columns["zone"].type, String)
+    assert columns["zone"].type.length == 20
     # Python-side default for status is the string "ACTIVE"
     status_default = columns["status"].default
     assert status_default is not None

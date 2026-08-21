@@ -1,4 +1,9 @@
-Creating API’s for fetching data to frontend
+# UrbanAPI Design
+
+> **Status: planned.** No UrbanAPI service or routes are implemented in this
+> repository. The paths and project structure below are proposals.
+
+Creating APIs for fetching data for the frontend.
 
 Tech Stack Used:
 

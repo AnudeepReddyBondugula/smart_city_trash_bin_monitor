@@ -1,38 +1,12 @@
 # Configuration Loading — Debug Guide
 
-## Log locations
+| Symptom | Check |
+|---|---|
+| Pydantic reports missing fields | Confirm every required PostgreSQL and Kafka variable is exported before importing application modules. |
+| Docker uses unexpected values | Check `services/data-simulator/.env.docker` and recreate the container. |
+| Native process uses unexpected values | Source `.env.local` before starting Python. |
+| Environment edit has no effect | Restart the process because `get_settings()` is cached. |
+| Host cannot reach PostgreSQL | Use host port 5433; containers use `postgres:5432`. |
 
-Config errors surface as an uncaught exception at import time, not a log
-line — check whichever runner's stdout/stderr invoked the process.
-
-## What to search for
-
-| Symptom | Where to look | Search term |
-|---------|---------------|-------------|
-| Crash before `main()` starts | traceback top frame | pydantic `ValidationError` |
-| Env var change has no effect | `src/config.py:33-35` | `@lru_cache` — settings cached after first call |
-| Wrong `DATABASE_URL` | `src/config.py:19-27` | check `POSTGRES_*` values it was assembled from |
-
-## Quick commands
-
-```bash
-# Print resolved settings for the current env
-cd services/data-simulator
-set -a; source .env.local; set +a
-PYTHONPATH=. python -c "from config import get_settings; print(get_settings())"
-```
-
-## Env vars that affect this flow
-
-| Variable | Effect | Default |
-|----------|--------|---------|
-| `POSTGRES_*` (USER/PASSWORD/HOST/PORT/DB) | required, assembled into `DATABASE_URL` | none (`ValidationError` if missing) |
-| `KAFKA_*` | required | none (`ValidationError` if missing) |
-| `NUMBER_OF_BINS` | optional, declared but unused at runtime | 100 |
-| `SIMULATION_INTERVAL` | optional, seconds between ticks | 5 |
-
-## Common breakpoints
-
-- `src/config.py:33` `get_settings()` — first call per process, where
-  `ValidationError` would raise.
-- `src/config.py:19` `DATABASE_URL` property — wrong connection string.
+The application intentionally has no built-in defaults for credentials,
+database identity, Kafka bootstrap servers, or Kafka topic.

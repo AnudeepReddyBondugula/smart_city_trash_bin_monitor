@@ -1,6 +1,7 @@
 import asyncio
 import argparse
 import uuid
+from random import uniform
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from faker import Faker
 from sqlalchemy import delete
@@ -10,6 +11,15 @@ from config import get_settings
 
 settings = get_settings()
 fake = Faker()
+
+HYDERABAD_CENTER = (17.3850, 78.4867)
+ZONE_OFFSETS = {
+    "CENTRAL": ((-0.02, 0.02), (-0.02, 0.02)),
+    "NORTH": ((0.04, 0.10), (-0.04, 0.04)),
+    "SOUTH": ((-0.10, -0.04), (-0.04, 0.04)),
+    "EAST": ((-0.04, 0.04), (0.04, 0.10)),
+    "WEST": ((-0.04, 0.04), (-0.10, -0.04)),
+}
 
 
 async def seed_db(count: int, clear: bool):
@@ -29,13 +39,19 @@ async def seed_db(count: int, clear: bool):
                 await session.commit()
 
             print(f"Creating {count} bins...")
+            zones = tuple(ZONE_OFFSETS)
             for i in range(count):
                 bin_id = f"BIN-{uuid.uuid4().hex[:8].upper()}-X"
+                zone = fake.random_element(zones)
+                latitude_offset, longitude_offset = ZONE_OFFSETS[zone]
                 new_bin = SmartBin(
                     bin_id=bin_id,
                     capacity=100.0,
-                    latitude=float(fake.latitude()),
-                    longitude=float(fake.longitude()),
+                    latitude=HYDERABAD_CENTER[0]
+                    + uniform(*latitude_offset),
+                    longitude=HYDERABAD_CENTER[1]
+                    + uniform(*longitude_offset),
+                    zone=zone,
                     status="ACTIVE",
                 )
                 session.add(new_bin)

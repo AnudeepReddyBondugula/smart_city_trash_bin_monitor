@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from random import uniform
 from faker import Faker
 
 from models.bin import Bin
@@ -153,6 +154,7 @@ class BinSimulator:
         The simulation models:
             - Fill level changes
             - Battery consumption
+            - Temperature drift
         """
         if fake.boolean(chance_of_getting_true=5):
             self.bin.current_fill_level = 0
@@ -182,9 +184,19 @@ class BinSimulator:
             ),
         )
 
+        self.bin.temperature = min(
+            35.0,
+            max(
+                20.0,
+                self.bin.temperature
+                + uniform(-0.5, 0.5),
+            ),
+        )
+
         logger.debug(
-            "Simulated bin '%s' | Fill: %.2f%% | Battery: %.2f%%",
+            "Simulated bin '%s' | Fill: %.2f%% | Battery: %.2f%% | Temperature: %.2f C",
             self.bin.bin_id,
             self.bin.current_fill_level,
             self.bin.battery_level,
+            self.bin.temperature,
         )

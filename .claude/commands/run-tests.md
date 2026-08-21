@@ -48,6 +48,7 @@ PYTHONPATH=src pytest tests/simulator/test_bin_simulator.py -v
 
 - In `-v` mode each test prints its docstring's first line (custom hooks in
   `tests/conftest.py:15-56`).
-- The Docker image also runs `pytest` at build time in the `test` stage
-  (`Dockerfile:31`), so `docker compose build` exercises the suite too.
+- The Dockerfile's `test` stage runs pytest. Exercise it explicitly with
+  `docker build --target test -t smart-city-data-simulator-test .`; the normal
+  Compose runtime build does not select that stage.
 - See the `testing` skill for conventions when adding tests.
