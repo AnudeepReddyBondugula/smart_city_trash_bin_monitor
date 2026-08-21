@@ -13,7 +13,7 @@ alembic.ini
   → 0002_add_zone adds zone, backfills UNASSIGNED, and enforces NOT NULL
 ```
 
-The historical `9b7a1e20a036` ID is intentionally preserved because databases
-created by the former `binforge/` layout already contain that version marker.
+`9b7a1e20a036` is the checked-in root revision. A database carrying that marker
+can upgrade directly through this graph.
 
 Related flow: run migrations before [`database-seeding`](../database-seeding/FLOW.md).

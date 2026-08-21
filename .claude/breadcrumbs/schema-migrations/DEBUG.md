@@ -16,6 +16,7 @@ migrations:
 ```bash
 docker compose build data_simulator
 docker compose run --rm data_simulator alembic upgrade head
+docker compose run --rm data_simulator alembic history --indicate-current
 ```
 
 ## Symptoms

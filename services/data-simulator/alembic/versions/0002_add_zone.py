@@ -1,4 +1,4 @@
-"""Add the zone assigned to each smart bin."""
+"""Add zone to smart_bins and backfill existing rows."""
 
 from typing import Sequence, Union
 

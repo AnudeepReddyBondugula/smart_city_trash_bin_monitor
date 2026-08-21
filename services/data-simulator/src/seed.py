@@ -39,9 +39,10 @@ async def seed_db(count: int, clear: bool):
                 await session.commit()
 
             print(f"Creating {count} bins...")
+            zones = tuple(ZONE_OFFSETS)
             for i in range(count):
                 bin_id = f"BIN-{uuid.uuid4().hex[:8].upper()}-X"
-                zone = fake.random_element(tuple(ZONE_OFFSETS))
+                zone = fake.random_element(zones)
                 latitude_offset, longitude_offset = ZONE_OFFSETS[zone]
                 new_bin = SmartBin(
                     bin_id=bin_id,

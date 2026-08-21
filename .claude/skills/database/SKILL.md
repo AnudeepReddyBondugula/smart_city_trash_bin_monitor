@@ -44,9 +44,9 @@ Only `ACTIVE` rows are loaded by `SimulationManager.initialize()`.
 5. Test fresh upgrade and upgrade from the previous revision on disposable
    PostgreSQL data.
 
-The baseline revision is intentionally `9b7a1e20a036` for compatibility with
-databases created by the former `binforge/` layout. Do not replace it with a new
-root revision.
+The checked-in baseline revision is `9b7a1e20a036`. Databases carrying that
+marker can upgrade through the current graph; do not replace it with a new root
+revision.
 
 Docker source is copied into the image, so rebuild before executing newly added
 migrations. Never stamp a database until its schema is verified to match the

@@ -44,14 +44,21 @@ docker compose run --rm data_simulator alembic upgrade head
 docker compose run --rm data_simulator python src/seed.py --count 50
 ```
 
+List migration history and mark the database's current revision:
+
+```bash
+docker compose run --rm data_simulator alembic history --indicate-current
+```
+
 _(To reset the database later, append `--clear` to the seed command)._
 
-Databases migrated by the earlier `binforge` service can upgrade directly; its
-original `9b7a1e20a036` revision remains the baseline of this migration chain.
+Databases whose `alembic_version` is `9b7a1e20a036` can upgrade directly because
+that revision is the baseline of the checked-in migration chain.
 
-If the database has the existing table but no `alembic_version` entry, mark its
-schema as that baseline before upgrading. This preserves its rows while adding
-the new columns:
+If the database has an existing table but no `alembic_version` entry, first
+inspect it with `\d smart_bins` in `psql`. Only stamp the baseline when its
+columns and constraints match revision `9b7a1e20a036`; stamping records a
+version without changing or validating the schema:
 
 ```bash
 docker compose run --rm data_simulator alembic stamp 9b7a1e20a036

@@ -13,7 +13,8 @@ from config import get_settings  # noqa: E402
 from database import Base  # noqa: E402
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL.replace("%", "%%"))
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL.replace("%", "%%"))
 target_metadata = Base.metadata
 
 
