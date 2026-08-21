@@ -4,7 +4,7 @@
 # The build context is the repository root, not this directory, so the shared
 # telemetry contract can be copied in. Both services build their view of the
 # payload from that one file.
-FROM python:3.12-slim AS base
+FROM python:3.11-slim AS base
 
 WORKDIR /app
 

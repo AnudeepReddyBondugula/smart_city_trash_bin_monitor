@@ -19,9 +19,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - data-simulator
-          - stream-processor
+        include:
+          - service: data-simulator
+            python-version: "3.12"
+            needs-java: false
+          # PySpark 3.5 supports Python up to 3.11. On 3.12 its pandas operators
+          # fail at run time importing distutils, removed in that version - so
+          # this is pinned rather than kept in step with the other service.
+          - service: stream-processor
+            python-version: "3.11"
+            needs-java: true
 
     services:
       postgres:
@@ -46,10 +53,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      # Spark runs on the JVM even when driven from Python, and local mode
+      # still starts one in-process.
+      - name: Set up Java 17
+        if: matrix.needs-java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
           cache-dependency-path: |
             services/${{ matrix.service }}/requirements.txt

@@ -133,6 +133,44 @@ def test_invalid_readings_never_reach_the_clean_stream(run_stream, telemetry):
     assert [row["bin_id"] for row in rows] == ["BIN-OK"]
 
 
+def test_the_stateful_operator_runs_under_spark(run_stream, telemetry):
+    """The per-bin rules are exercised through the real Spark operator.
+
+    The rules themselves are tested directly and far more thoroughly without a
+    cluster. What this covers is the wiring those tests cannot: that the state
+    schema round-trips through Spark's state store, that the pandas frames the
+    operator yields match the declared output schema, and that grouping by bin
+    reaches the function at all.
+    """
+    from pipeline.bin_state import RECORD_ALERT, RECORD_STATE, evaluate
+
+    def transform(raw):
+        return evaluate(clean_events(raw))
+
+    messages = [
+        telemetry(
+            bin_id="BIN-FILLING",
+            timestamp=f"2026-08-22T10:{index:02d}:00+00:00",
+            # Crosses the critical threshold partway through
+            current_fill_level=40.0 + index * 5,
+        )
+        for index in range(12)
+    ]
+
+    rows = run_stream(transform, messages, "stateful")
+
+    by_type = {row["record_type"] for row in rows}
+    assert RECORD_STATE in by_type
+    assert RECORD_ALERT in by_type
+
+    alerts = {row["alert_type"] for row in rows if row["record_type"] == RECORD_ALERT}
+    assert "CRITICAL_FILL" in alerts
+
+    state_rows = [row for row in rows if row["record_type"] == RECORD_STATE]
+    assert state_rows[-1]["bin_id"] == "BIN-FILLING"
+    assert state_rows[-1]["last_seen"] is not None
+
+
 def test_zone_windows_aggregate_readings(run_stream, telemetry):
     """A five-minute window carries the counts and averages rollups need.
 

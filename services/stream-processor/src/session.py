@@ -1,6 +1,8 @@
 """Spark session and Kafka source construction."""
 
 import logging
+import os
+import sys
 
 from pyspark.sql import DataFrame, SparkSession
 
@@ -8,6 +10,22 @@ from config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def ensure_worker_interpreter() -> None:
+    """
+    Point Spark's Python workers at the interpreter that is driving them.
+
+    Spark launches workers as plain `python3` from PATH, which is not
+    necessarily the interpreter running this code. When it is not - inside a
+    virtual environment, most obviously - the workers start without pandas or
+    pyarrow and every pandas-based operator fails at run time with a bare import
+    error from inside a Spark stack trace, a long way from the actual cause.
+
+    Must be set before a session is created; it is read at worker launch.
+    """
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
 
 
 def build_session() -> SparkSession:
@@ -28,6 +46,8 @@ def build_session() -> SparkSession:
     from the deployment. This is the setting to revisit first when one machine
     measurably runs out - not before.
     """
+    ensure_worker_interpreter()
+
     session = (
         SparkSession.builder.appName(settings.SPARK_APP_NAME)
         .master(settings.SPARK_MASTER)

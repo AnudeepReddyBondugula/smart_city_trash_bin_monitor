@@ -9,7 +9,7 @@ import logging
 
 from config import get_settings
 from logging_config import setup_logging
-from pipeline import clean, zone_metrics
+from pipeline import bin_state, clean, zone_metrics
 from session import build_session, read_telemetry
 from sinks import apply_schema
 
@@ -71,6 +71,7 @@ def main() -> None:
         start_parquet_history(clean_events),
         start_dead_letters(raw),
         zone_metrics.start(clean_events),
+        bin_state.start(clean_events),
     ]
 
     logger.info(

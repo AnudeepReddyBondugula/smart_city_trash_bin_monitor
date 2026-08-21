@@ -1,7 +1,19 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
+
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+
+# Spark's Python workers are separate processes and inherit only the
+# environment, not pytest's import configuration. Without src on their path they
+# cannot import the module holding the function they were asked to run, and fail
+# with a bare ModuleNotFoundError from inside a Spark stack trace. The image
+# sets the same thing through PYTHONPATH.
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    filter(None, [str(SERVICE_ROOT), str(SERVICE_ROOT / "src"), os.environ.get("PYTHONPATH")])
+)
 
 # Set dummy environment variables for pydantic settings validation during tests
 os.environ.setdefault("POSTGRES_HOST", "localhost")
@@ -26,6 +38,13 @@ def spark():
     data keeps the tests fast and readable while exercising the real code.
     """
     from pyspark.sql import SparkSession
+
+    from session import ensure_worker_interpreter
+
+    # Same call the service makes, for the same reason: without it Spark's
+    # workers launch under the system python rather than this virtual
+    # environment, and every pandas-based operator fails on a missing import.
+    ensure_worker_interpreter()
 
     session = (
         SparkSession.builder.appName("stream-processor-tests")
