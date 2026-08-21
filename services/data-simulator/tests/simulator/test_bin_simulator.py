@@ -1,7 +1,10 @@
 import pytest
 from unittest.mock import patch, AsyncMock
+from src.config import get_settings
 from src.models.bin import Bin
 from src.simulator.bin_simulator import BinSimulator
+
+settings = get_settings()
 
 @pytest.fixture
 def bin_instance():
@@ -88,15 +91,46 @@ def test_simulate_empty_bin(mock_fake, bin_instance):
     ensuring the fill level resets to exactly 0.0.
     """
     simulator = BinSimulator(bin_instance)
-    bin_instance.current_fill_level = 50.0
-    
+    # Above the collection threshold, so the bin is worth collecting
+    bin_instance.current_fill_level = settings.COLLECTION_THRESHOLD_PCT + 5.0
+
     # Emptying the bin
     mock_fake.boolean.return_value = True
     mock_fake.pyfloat.return_value = 0.1
-    
+
     simulator._simulate()
-    
+
     assert bin_instance.current_fill_level == 0.0
+
+
+def test_bins_go_critical_before_they_are_collected():
+    """Collection happens above the level consumers call critical, not below.
+
+    If bins were emptied on the way up to 80% they would never once register as
+    critical: no collection list, no SLA clock, and no fire risk, since that
+    rule needs a bin to be nearly full as well as hot.
+    """
+    assert settings.COLLECTION_THRESHOLD_PCT > 80.0
+
+
+@patch('src.simulator.bin_simulator.fake')
+def test_simulate_does_not_empty_a_bin_below_the_threshold(mock_fake, bin_instance):
+    """
+    Test that a bin is never collected while it is nearly empty.
+    Collecting at any fill level stops bins ever reaching a critical level at a
+    realistic fill rate, and produces drops that downstream collection detection
+    does not recognise as collections.
+    """
+    simulator = BinSimulator(bin_instance)
+    bin_instance.current_fill_level = 10.0
+
+    # Would empty the bin, if it were full enough to be worth collecting
+    mock_fake.boolean.return_value = True
+    mock_fake.pyfloat.side_effect = [0.1, 0.05]
+
+    simulator._simulate()
+
+    assert bin_instance.current_fill_level == pytest.approx(10.1)
 
 @pytest.mark.asyncio
 @patch('src.simulator.bin_simulator.kafka_client')

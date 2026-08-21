@@ -12,6 +12,13 @@ from config import get_settings
 settings = get_settings()
 fake = Faker()
 
+MAX_BINS_PER_RUN = 5000
+
+# Real bins are not all one size. Seeding a single capacity makes the absolute
+# fill level and the fill percentage numerically identical, which hides every
+# place downstream that compares a raw level against a percentage threshold.
+BIN_CAPACITIES = (100.0, 240.0, 660.0)
+
 HYDERABAD_CENTER = (17.3850, 78.4867)
 ZONE_OFFSETS = {
     "CENTRAL": ((-0.02, 0.02), (-0.02, 0.02)),
@@ -23,8 +30,11 @@ ZONE_OFFSETS = {
 
 
 async def seed_db(count: int, clear: bool):
-    if count > 500:
-        print("Error: For safety, you cannot seed more than 500 bins at a time.")
+    if count > MAX_BINS_PER_RUN:
+        print(
+            f"Error: For safety, you cannot seed more than "
+            f"{MAX_BINS_PER_RUN} bins at a time."
+        )
         return
 
     print("Connecting to database...")
@@ -46,7 +56,7 @@ async def seed_db(count: int, clear: bool):
                 latitude_offset, longitude_offset = ZONE_OFFSETS[zone]
                 new_bin = SmartBin(
                     bin_id=bin_id,
-                    capacity=100.0,
+                    capacity=fake.random_element(BIN_CAPACITIES),
                     latitude=HYDERABAD_CENTER[0]
                     + uniform(*latitude_offset),
                     longitude=HYDERABAD_CENTER[1]

@@ -42,6 +42,12 @@ class Bin:
         temperature (float):
             Simulated temperature in degrees Celsius.
 
+        fault_mode (str | None):
+            The fault this bin has been told to exhibit, or None for a healthy
+            bin. The bin only records the label; acting on it belongs to
+            `BinSimulator`, in keeping with this class holding no simulation
+            logic. See `simulator.bin_simulator.FAULT_MODES`.
+
     Methods:
         update_location(latitude, longitude):
             Updates the geographical coordinates of the bin.
@@ -58,16 +64,28 @@ class Bin:
         latitude: float,
         longitude: float,
         zone: str,
+        fault_mode: str | None = None,
     ):
         self.bin_id = bin_id
         self.capacity = capacity
         self.latitude = latitude
         self.longitude = longitude
         self.zone = zone
+        self.fault_mode = fault_mode
 
         self.current_fill_level = 0.0
         self.battery_level = 100.0
         self.temperature = 25.0
+
+    @property
+    def fill_pct(self) -> float:
+        """
+        Fill level as a percentage of this bin's capacity.
+
+        Bins are not all the same size, so the raw fill level cannot be compared
+        against a percentage threshold directly.
+        """
+        return self.current_fill_level / self.capacity * 100
 
     def update_location(self, latitude: float, longitude: float):
         """

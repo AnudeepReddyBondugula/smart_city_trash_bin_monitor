@@ -1,5 +1,5 @@
 from models.bin import Bin
-from simulator.bin_simulator import BinSimulator
+from simulator.bin_simulator import BinSimulator, assign_fault_modes
 
 from database import AsyncSessionLocal, SmartBin
 from sqlalchemy import select
@@ -45,16 +45,23 @@ class SimulationManager:
             )
             db_bins = result.scalars().all()
 
-            for db_bin in db_bins:
-
-                bin = Bin(
+            bins = [
+                Bin(
                     bin_id=db_bin.bin_id,
                     latitude=db_bin.latitude,
                     longitude=db_bin.longitude,
                     capacity=db_bin.capacity,
                     zone=db_bin.zone,
                 )
+                for db_bin in db_bins
+            ]
 
+            # Faults are assigned across the whole fleet at once rather than per
+            # bin, so the share of faulty bins and the spread of fault modes are
+            # both known rather than left to chance.
+            assign_fault_modes(bins)
+
+            for bin in bins:
                 simulator = BinSimulator(bin)
                 simulator.start()
 
