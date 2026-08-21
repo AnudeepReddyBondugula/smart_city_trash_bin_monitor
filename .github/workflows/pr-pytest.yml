@@ -10,8 +10,18 @@ permissions:
 
 jobs:
   pytest:
-    name: Run Pytests
+    name: Run Pytests (${{ matrix.service }})
     runs-on: ubuntu-latest
+
+    # One job per service. This was hardcoded to data-simulator, which meant a
+    # new service could be added with a full test suite and CI would never run
+    # a single one of its tests. Add new services here.
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - data-simulator
+          - stream-processor
 
     services:
       postgres:
@@ -30,7 +40,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: services/data-simulator
+        working-directory: services/${{ matrix.service }}
 
     steps:
       - name: Checkout repository
@@ -42,8 +52,8 @@ jobs:
           python-version: "3.12"
           cache: "pip"
           cache-dependency-path: |
-            services/data-simulator/requirements.txt
-            services/data-simulator/requirements-dev.txt
+            services/${{ matrix.service }}/requirements.txt
+            services/${{ matrix.service }}/requirements-dev.txt
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip

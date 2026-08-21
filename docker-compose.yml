@@ -39,6 +39,35 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # Creates the topics explicitly instead of letting the broker auto-create
+  # them. An auto-created topic gets the broker default of a single partition,
+  # which pins the entire stream to one consumer task no matter how many cores
+  # are available. The producer already keys every message by bin_id, so
+  # splitting across partitions keeps each bin's events in order on one
+  # partition - which the stateful processing downstream depends on.
+  kafka_init:
+    image: confluentinc/cp-kafka:7.4.1
+    container_name: smartbin_kafka_init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists
+        --topic smartbin-telemetry-v1 --partitions 12 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists
+        --topic smartbin-telemetry-dlq --partitions 3 --replication-factor 1 &&
+      echo 'Topics ready:' &&
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+    restart: "no"
 
   data_simulator:
     build:
@@ -50,6 +79,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
