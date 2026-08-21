@@ -82,5 +82,32 @@ services:
       kafka_init:
         condition: service_completed_successfully
 
+  stream_processor:
+    build:
+      # Built from the repository root so the shared telemetry contract is
+      # inside the build context. Both services build their view of the payload
+      # from that one file.
+      context: .
+      dockerfile: services/stream-processor/Dockerfile
+      target: runtime
+    container_name: stream_processor
+    # Deliberately the same environment file as the simulator: one source for
+    # the database credentials, the broker address and the topic name means the
+    # producer and the consumer cannot end up pointed at different topics.
+    env_file:
+      - ./services/data-simulator/.env.docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+    volumes:
+      # Checkpoints and the Parquet history. This is not a cache - the
+      # checkpoints hold every SLA clock and last-seen timestamp in the fleet,
+      # so removing this volume erases the pipeline's memory, not its scratch
+      # space.
+      - spark_state:/data
+
 volumes:
   postgres_data:
+  spark_state:
