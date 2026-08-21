@@ -179,7 +179,11 @@ class BinSimulator:
             try:
                 await self._task
             except asyncio.CancelledError:
-                logger.warning(
+                # Debug, not warning: cancelling the task is how stop() works,
+                # so this is the expected path. At warning level an ordinary
+                # shutdown buried the log under one line per bin - which trains
+                # everyone to ignore warnings from this service.
+                logger.debug(
                     "Simulation task cancelled for bin '%s'.",
                     self.bin.bin_id,
                 )
