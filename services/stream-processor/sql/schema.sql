@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS bin_state_latest (
     -- from it. Null until a bin has reported twice.
     fill_rate_pct_per_min DOUBLE PRECISION,
     minutes_to_full       DOUBLE PRECISION,
+    -- Which of this bin's sensors are reporting values that cannot be true, or
+    -- null when they are all healthy. The readings themselves are nulled above
+    -- rather than discarded, so a bin with one dead sensor stays visible here
+    -- instead of vanishing from monitoring entirely.
+    sensor_faults         TEXT,
     last_seen             TIMESTAMPTZ      NOT NULL,
     updated_at            TIMESTAMPTZ      NOT NULL DEFAULT now()
 );
@@ -149,6 +154,11 @@ SELECT
     (SELECT count(*) FROM bin_alerts
       WHERE alert_type = 'SLA_BREACH'
         AND fired_at >= date_trunc('day', now()))                       AS sla_breaches_today,
+    -- Bins reporting at least one unusable sensor. These are still counted in
+    -- every figure above, which is the point: a bin with a dead thermometer is
+    -- still a bin, and used to disappear from all of them.
+    (SELECT count(*) FROM bin_state_latest
+      WHERE sensor_faults IS NOT NULL)                                  AS faulty_sensor_bins,
     (SELECT count(DISTINCT zone) FROM bin_state_latest)                 AS zones_covered;
 
 -- The busiest zones, by how full their bins currently are.

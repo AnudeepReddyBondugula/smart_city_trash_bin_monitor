@@ -174,12 +174,44 @@ async def test_frozen_bin_still_publishes(mock_sleep, mock_kafka_client):
 
 def test_spike_bin_reports_an_impossible_temperature():
     """A spiking bin reports a value no sensor could produce."""
+    simulator = BinSimulator(make_bin("SPIKE"))
+
+    payload = simulator._next_payload()
+
+    assert payload["temperature"] == IMPOSSIBLE_TEMPERATURE
+
+
+def test_spike_bin_also_reports_an_impossible_fill_level():
+    """It alternates, because consumers treat the two kinds differently.
+
+    A bad temperature can be discarded on its own; a bad fill level leaves
+    nothing usable in the message. Both paths need exercising.
+    """
+    simulator = BinSimulator(make_bin("SPIKE"))
+
+    payloads = [simulator._next_payload() for _ in range(4)]
+    overfull = [
+        payload
+        for payload in payloads
+        if payload["current_fill_level"] > payload["capacity"]
+    ]
+
+    assert overfull, "no message ever carried an impossible fill level"
+
+
+def test_a_spiking_bin_keeps_filling_underneath():
+    """The fault is in what is reported, not in what is true.
+
+    A broken sensor does not stop the bin filling, and the bin is still worth
+    tracking - which is only possible if its real state stays sane.
+    """
     bin_instance = make_bin("SPIKE")
     simulator = BinSimulator(bin_instance)
 
-    tick(simulator)
+    tick(simulator, count=10)
 
-    assert bin_instance.temperature == IMPOSSIBLE_TEMPERATURE
+    assert 0 < bin_instance.current_fill_level <= bin_instance.capacity
+    assert bin_instance.temperature <= settings.TEMP_NORMAL_MAX
 
 
 # --------------------------------------------------------------------------

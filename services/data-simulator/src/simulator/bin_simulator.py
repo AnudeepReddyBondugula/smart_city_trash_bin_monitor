@@ -21,7 +21,7 @@ fake = Faker()
 #
 #   SILENT       stops publishing         -> dead device detection
 #   FROZEN       republishes one reading  -> stuck sensor detection
-#   SPIKE        publishes a value no sensor could produce -> validation, dead letters
+#   SPIKE        reports values no sensor could produce -> sensor fault, dead letters
 #   DUPLICATE    re-sends the last event verbatim -> deduplication
 #   HOT          runs far above ambient   -> fire risk detection
 #   JUMP         one large but legal fill jump -> abnormal jump detection
@@ -262,9 +262,37 @@ class BinSimulator:
             self._published += 1
             return duplicate
 
-        self._last_payload = self.bin.to_payload()
+        payload = self.bin.to_payload()
+
+        if self.bin.fault_mode == "SPIKE":
+            payload = self._corrupt(payload)
+
+        self._last_payload = payload
         self._published += 1
         return self._last_payload
+
+    def _corrupt(self, payload: dict) -> dict:
+        """
+        Report a value no sensor could produce, leaving the bin itself alone.
+
+        A broken sensor is a fault in what is *reported*, not in what is true,
+        so this corrupts the outgoing payload rather than the bin's state. The
+        bin carries on filling normally underneath, which is what makes it
+        worth still tracking.
+
+        Alternates between two kinds of nonsense, because consumers treat them
+        differently and both paths need exercising: an impossible temperature
+        says nothing about how full the bin is and can be discarded on its own,
+        while an impossible fill level leaves nothing usable in the message.
+        """
+        corrupted = dict(payload)
+
+        if self._published % 2 == 0:
+            corrupted["temperature"] = IMPOSSIBLE_TEMPERATURE
+        else:
+            corrupted["current_fill_level"] = round(self.bin.capacity * 1.5, 2)
+
+        return corrupted
 
     def _simulate(self) -> None:
         """
@@ -383,10 +411,6 @@ class BinSimulator:
         enough to matter - and it does so at any capacity and any fill rate,
         with nothing to re-tune when those change.
         """
-        if self.bin.fault_mode == "SPIKE":
-            self.bin.temperature = IMPOSSIBLE_TEMPERATURE
-            return
-
         if self.bin.fault_mode == "HOT":
             headroom = settings.TEMP_FIRE_MAX - settings.TEMP_NORMAL_MAX
             self.bin.temperature = (

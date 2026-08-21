@@ -71,6 +71,7 @@ OUTPUT_SCHEMA = StructType(
         StructField("longitude", DoubleType()),
         StructField("fill_rate_pct_per_min", DoubleType()),
         StructField("minutes_to_full", DoubleType()),
+        StructField("sensor_faults", StringType()),
         StructField("last_seen", TimestampType()),
     ]
 )
@@ -105,6 +106,9 @@ STATE_SCHEMA = StructType(
         StructField("predicted_fired", BooleanType()),
         StructField("sla_critical_fired", BooleanType()),
         StructField("sla_overflow_fired", BooleanType()),
+        # Whether a broken sensor has already been reported for this bin, so a
+        # permanently faulty one produces a single alert rather than a stream.
+        StructField("sensor_fault_fired", BooleanType()),
         # Fire risk is the exception: it repeats while it stays true, because a
         # fire does not stop being urgent because it was already reported.
         StructField("last_fire_risk_ms", LongType()),
@@ -132,6 +136,7 @@ EMPTY_STATE = {
     "predicted_fired": False,
     "sla_critical_fired": False,
     "sla_overflow_fired": False,
+    "sensor_fault_fired": False,
     "last_fire_risk_ms": 0,
 }
 
@@ -145,6 +150,7 @@ SEVERITY = {
     "SENSOR_STUCK": "MEDIUM",
     "ANOMALY_JUMP": "MEDIUM",
     "LOW_BATTERY": "MEDIUM",
+    "SENSOR_FAULT": "MEDIUM",
     "COLLECTED": "INFO",
 }
 
@@ -180,6 +186,7 @@ def _alert(memory: dict, bin_id: str, alert_type: str, event_ms: int, detail: st
         "longitude": memory["longitude"],
         "fill_rate_pct_per_min": None,
         "minutes_to_full": None,
+        "sensor_faults": None,
         "last_seen": _to_timestamp(memory["last_event_ms"]),
     }
 
@@ -378,6 +385,29 @@ def evaluate_reading(memory: dict, reading: dict, bin_id: str) -> list[dict]:
     elif battery is not None:
         memory["low_battery_fired"] = False
 
+    # ---- Broken sensors ----------------------------------------------------
+    # A reading arrives with individual sensors already nulled out by the
+    # cleaning step, which keeps the bin trackable when only one of them has
+    # failed. Without an alert here that repair would be silent, and a bin whose
+    # thermometer died would quietly stop contributing to fire risk with nobody
+    # told - which is the same blind spot as discarding it, only harder to see.
+    faults = reading.get("sensor_faults")
+
+    if faults:
+        if not memory["sensor_fault_fired"]:
+            alerts.append(
+                _alert(
+                    memory,
+                    bin_id,
+                    "SENSOR_FAULT",
+                    event_ms,
+                    f"unusable readings from: {faults}",
+                )
+            )
+            memory["sensor_fault_fired"] = True
+    else:
+        memory["sensor_fault_fired"] = False
+
     # ---- SLA clocks --------------------------------------------------------
     alerts.extend(_sla_breaches(memory, bin_id, event_ms))
 
@@ -452,7 +482,9 @@ def fill_projection(previous_pct, previous_ms, fill_pct, event_ms):
     return rate, (100 - fill_pct) / rate
 
 
-def state_record(memory: dict, bin_id: str, fill_rate, minutes_to_full) -> dict:
+def state_record(
+    memory: dict, bin_id: str, fill_rate, minutes_to_full, sensor_faults=None
+) -> dict:
     """The bin's current state, for the one-row-per-bin table."""
     return {
         "record_type": RECORD_STATE,
@@ -471,6 +503,7 @@ def state_record(memory: dict, bin_id: str, fill_rate, minutes_to_full) -> dict:
         "longitude": memory["longitude"],
         "fill_rate_pct_per_min": fill_rate,
         "minutes_to_full": minutes_to_full,
+        "sensor_faults": sensor_faults,
         "last_seen": _to_timestamp(memory["last_event_ms"]),
     }
 
@@ -514,7 +547,7 @@ def track_bin(key, pdfs, state):
         return
 
     alerts = []
-    fill_rate = minutes_to_full = None
+    fill_rate = minutes_to_full = sensor_faults = None
 
     for pdf in pdfs:
         # Events for one bin can arrive in any order within a batch, and every
@@ -533,10 +566,12 @@ def track_bin(key, pdfs, state):
                 "battery_level": _as_float(row["battery_level"]),
                 "latitude": _as_float(row["latitude"]),
                 "longitude": _as_float(row["longitude"]),
+                "sensor_faults": _as_text(row["sensor_faults"]),
                 "event_ms": int(row[EVENT_TIME_COLUMN].timestamp() * 1000),
             }
 
             alerts.extend(evaluate_reading(memory, reading, bin_id))
+            sensor_faults = reading["sensor_faults"]
             fill_rate, minutes_to_full = fill_projection(
                 previous_pct, previous_ms, reading["fill_pct"], reading["event_ms"]
             )
@@ -551,7 +586,9 @@ def track_bin(key, pdfs, state):
     )
     state.setTimeoutTimestamp(max(timeout_ms, state.getCurrentWatermarkMs() + 1))
 
-    rows = alerts + [state_record(memory, bin_id, fill_rate, minutes_to_full)]
+    rows = alerts + [
+        state_record(memory, bin_id, fill_rate, minutes_to_full, sensor_faults)
+    ]
     yield pd.DataFrame(rows, columns=OUTPUT_SCHEMA.fieldNames())
 
 
@@ -560,6 +597,13 @@ def _as_float(value):
     if value is None or pd.isna(value):
         return None
     return float(value)
+
+
+def _as_text(value):
+    """Pandas nulls become None so an absent fault is falsy, not the string 'nan'."""
+    if value is None or pd.isna(value):
+        return None
+    return str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -590,6 +634,7 @@ STATE_COLUMNS = [
     "longitude",
     "fill_rate_pct_per_min",
     "minutes_to_full",
+    "sensor_faults",
     "last_seen",
 ]
 

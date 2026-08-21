@@ -42,6 +42,7 @@ def reading(**overrides):
         "battery_level": 80.0,
         "latitude": 17.4,
         "longitude": 78.5,
+        "sensor_faults": None,
         "event_ms": START_MS,
     }
     values.update(overrides)
@@ -436,6 +437,68 @@ def test_the_projection_arithmetic_is_right():
 
 
 # ---------------------------------------------------------------------------
+# Broken sensors
+# ---------------------------------------------------------------------------
+
+
+def test_a_broken_sensor_is_reported():
+    """The repair upstream must not be silent.
+
+    A bin whose thermometer died has its temperature nulled so the bin stays
+    trackable. Without this alert it would quietly stop contributing to fire
+    risk with nobody told - the same blind spot as discarding it, only harder
+    to see.
+    """
+    memory = fresh_memory()
+
+    assert "SENSOR_FAULT" in feed(memory, reading(sensor_faults="temperature"))
+
+
+def test_a_healthy_bin_reports_no_sensor_fault():
+    memory = fresh_memory()
+
+    assert "SENSOR_FAULT" not in feed(memory, reading())
+
+
+def test_a_broken_sensor_is_reported_once_not_every_reading():
+    """A permanently faulty sensor produces one alert, not a stream of them."""
+    memory = fresh_memory()
+    faulty = [
+        reading(sensor_faults="temperature", event_ms=START_MS + minutes(index))
+        for index in range(20)
+    ]
+
+    assert feed(memory, *faulty).count("SENSOR_FAULT") == 1
+
+
+def test_a_sensor_fault_can_be_reported_again_after_a_repair():
+    """Clearing when the sensor recovers is what makes firing once safe."""
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(sensor_faults="temperature", event_ms=START_MS),
+        reading(event_ms=START_MS + minutes(1)),
+        reading(sensor_faults="temperature", event_ms=START_MS + minutes(2)),
+    )
+
+    assert fired.count("SENSOR_FAULT") == 2
+
+
+def test_a_bin_with_a_broken_sensor_is_still_tracked():
+    """The whole point: it stays in the state store and keeps being watched.
+
+    It must still reach critical fill, and still arm its offline timeout.
+    """
+    memory = fresh_memory()
+
+    fired = feed(memory, reading(sensor_faults="temperature", fill_pct=85.0))
+
+    assert "CRITICAL_FILL" in fired
+    assert memory["last_fill_pct"] == 85.0
+
+
+# ---------------------------------------------------------------------------
 # SLA clocks
 # ---------------------------------------------------------------------------
 
@@ -522,6 +585,7 @@ def as_frame(*readings):
                 "temperature": values["temperature"],
                 "latitude": values["latitude"],
                 "longitude": values["longitude"],
+                "sensor_faults": values["sensor_faults"],
                 "event_time": pd.Timestamp(values["event_ms"], unit="ms", tz="UTC"),
             }
             for values in readings

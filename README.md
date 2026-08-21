@@ -128,28 +128,50 @@ One Spark application, four queries, one nightly batch job.
 | `bin_events` | Parquet, partitioned by date | The history the nightly job reads |
 | `dead_letters` | `smartbin-telemetry-dlq` | Messages that could not be parsed or believed |
 | `zone_metrics` | `zone_metrics_5m` | Per-zone rollups, at every grain, by SQL |
-| `bin_state` | `bin_alerts`, `bin_state_latest` | Ten alert types from one per-bin state read |
+| `bin_state` | `bin_alerts`, `bin_state_latest` | Eleven alert types from one per-bin state read |
 | `batch/rollups.py` | `zone_hourly_profile`, `zone_daily_trend` | Peak hours and long-range trends |
-
-Alert types: `CRITICAL_FILL`, `OVERFLOW`, `PREDICTED_OVERFLOW`, `FIRE_RISK`,
-`LOW_BATTERY`, `OFFLINE`, `COLLECTED`, `ANOMALY_JUMP`, `SENSOR_STUCK`,
-`SLA_BREACH`.
 
 Dashboard figures are the `city_kpi` and `zone_leaderboard` views over those
 tables — no Spark job of their own.
+
+Alert types: `CRITICAL_FILL`, `OVERFLOW`, `PREDICTED_OVERFLOW`, `FIRE_RISK`,
+`LOW_BATTERY`, `OFFLINE`, `COLLECTED`, `ANOMALY_JUMP`, `SENSOR_STUCK`,
+`SENSOR_FAULT`, `SLA_BREACH`.
+
+### One bad sensor does not lose the bin
+
+Validation is field-level, not message-level. A field the pipeline needs — bin,
+zone, capacity, fill level, timestamp — is fatal and the message is
+dead-lettered whole. A sensor that can fail on its own — temperature, battery,
+coordinates — is **nulled and the reading kept**, and the bin raises
+`SENSOR_FAULT` naming what failed.
+
+That distinction matters more than it looks. Rejecting the whole message for an
+impossible temperature meant the bin never reached the state store, so it
+vanished from every dashboard figure *and* never armed an offline timeout — a
+bin publishing every five seconds became completely invisible, with the DLQ as
+its only trace. The loudest possible sensor failure produced the quietest
+possible outcome.
+
+Nulled rather than clamped, because clamping 150 °C to 120 °C invents a
+plausible number no sensor reported and then averages it into the zone
+temperature as though it were real.
+
+`city_kpi.faulty_sensor_bins` counts these. They stay in every other figure too,
+which is the point.
 
 ### Fault injection
 
 A share of bins (`FAULT_INJECTION_RATE`, default 12%) misbehave on purpose, so
 every detector has something to detect. Without them the offline, stuck-sensor,
-duplicate, impossible-value, fire-risk and SLA rules can be written but never
+duplicate, sensor-fault, fire-risk and SLA rules can be written but never
 observed working.
 
 | Mode | Behaviour | Proves |
 |---|---|---|
 | `SILENT` | reports for a while, then stops | `OFFLINE` |
 | `FROZEN` | repeats one reading forever | `SENSOR_STUCK` |
-| `SPIKE` | reports 150 °C | dead-lettering |
+| `SPIKE` | alternates an impossible temperature and an impossible fill level | `SENSOR_FAULT` and dead-lettering |
 | `DUPLICATE` | re-sends the previous event verbatim | deduplication |
 | `HOT` | runs hot in proportion to how full it is | `FIRE_RISK` |
 | `JUMP` | one large but legal fill jump | `ANOMALY_JUMP` |
@@ -225,12 +247,19 @@ docker exec stream_processor ls /data/bin_events
 docker compose exec stream_processor python src/batch/rollups.py
 ```
 
-With fault injection on, all ten alert types should appear in that first query.
+With fault injection on, all eleven alert types should appear in that first
+query, and `city_kpi.total_bins` should equal the number you seeded. If it is
+short, some bins are being dead-lettered — compare the DLQ bin IDs against
+`bin_state_latest`.
 
 > `/data` on the stream processor is a named volume holding the checkpoints. It
 > is not a cache: it holds every SLA clock, last-seen timestamp and
 > deduplication key in the fleet. `docker compose down -v` erases the
 > pipeline's memory, not its scratch space.
+>
+> Changing `STATE_SCHEMA` in `bin_state.py` makes existing checkpoints
+> unreadable — Spark cannot restore state written under a different schema.
+> Delete `/data/checkpoints/bin_state` after any such change.
 
 ## Testing
 

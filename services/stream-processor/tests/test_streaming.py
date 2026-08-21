@@ -119,18 +119,40 @@ def test_fill_pct_is_attached_to_the_clean_stream(run_stream, telemetry):
     assert rows[0]["fill_pct"] == pytest.approx(50.0)
 
 
-def test_invalid_readings_never_reach_the_clean_stream(run_stream, telemetry):
-    """Impossible values are filtered out before anything downstream sees them."""
+def test_unusable_messages_never_reach_the_clean_stream(run_stream, telemetry):
+    """A message with nothing salvageable is filtered before anything sees it."""
     rows = run_stream(
         clean_events,
         [
             telemetry(bin_id="BIN-OK"),
-            telemetry(bin_id="BIN-BAD", temperature=999.0),
+            telemetry(bin_id="BIN-BAD", current_fill_level=9999.0),
         ],
         "clean_filters",
     )
 
     assert [row["bin_id"] for row in rows] == ["BIN-OK"]
+
+
+def test_a_bin_with_one_broken_sensor_still_reaches_the_clean_stream(
+    run_stream, telemetry
+):
+    """It stays in the stream, with only the unusable reading nulled.
+
+    This is what keeps the bin in the state store, so it still goes on the
+    collection list and still arms an offline timeout. Discarding the whole
+    message made a bin that was publishing every few seconds invisible to
+    every downstream figure.
+    """
+    rows = run_stream(
+        clean_events,
+        [telemetry(bin_id="BIN-HOT-SENSOR", temperature=999.0, current_fill_level=88.0)],
+        "clean_repairs",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["temperature"] is None
+    assert rows[0]["fill_pct"] == pytest.approx(88.0)
+    assert "temperature" in rows[0]["sensor_faults"]
 
 
 def test_the_stateful_operator_runs_under_spark(run_stream, telemetry):

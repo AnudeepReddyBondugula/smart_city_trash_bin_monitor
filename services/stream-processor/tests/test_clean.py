@@ -83,11 +83,91 @@ def test_unparseable_message_is_rejected_not_dropped(kafka_records):
     assert "unparseable_or_missing_bin_id" in reasons[0]
 
 
-def test_impossible_temperature_is_rejected(kafka_records, telemetry):
-    """A reading no sensor could produce is not believed."""
-    reasons = rejections(kafka_records, telemetry(temperature=150.0))
+def test_impossible_temperature_does_not_discard_the_whole_reading(
+    kafka_records, telemetry
+):
+    """One dead sensor must not make the entire bin disappear.
 
-    assert any("temperature_above" in reason for reason in reasons)
+    Rejecting the whole message here was a monitoring blind spot: the bin never
+    reached the state store, so it vanished from every dashboard figure and
+    never armed an offline timeout either. A bin publishing every few seconds
+    became completely invisible, and the loudest sensor failure produced the
+    quietest outcome.
+    """
+    rows = valid_rows(kafka_records, telemetry(temperature=150.0))
+
+    assert len(rows) == 1
+    assert rows[0]["bin_id"] == "BIN-TEST-01"
+
+
+def test_an_impossible_temperature_is_nulled_not_kept(kafka_records, telemetry):
+    """The unusable reading itself is discarded, only the reading."""
+    rows = valid_rows(kafka_records, telemetry(temperature=150.0))
+
+    assert rows[0]["temperature"] is None
+
+
+def test_an_impossible_temperature_is_not_clamped(kafka_records, telemetry):
+    """Clamping would invent a plausible number no sensor reported.
+
+    120 C would then be averaged into the zone temperature as though it were a
+    real measurement. A null is honest that the reading is missing.
+    """
+    rows = valid_rows(kafka_records, telemetry(temperature=150.0))
+
+    assert rows[0]["temperature"] != 120.0
+
+
+def test_the_usable_readings_survive_a_broken_sensor(kafka_records, telemetry):
+    """Fill level is untouched by a thermometer failing."""
+    rows = valid_rows(
+        kafka_records,
+        telemetry(temperature=150.0, current_fill_level=87.0, battery_level=64.0),
+    )
+
+    assert rows[0]["current_fill_level"] == 87.0
+    assert rows[0]["battery_level"] == 64.0
+
+
+def test_the_broken_sensor_is_named(kafka_records, telemetry):
+    """The repair is recorded, so it can be alerted on rather than silent."""
+    rows = valid_rows(kafka_records, telemetry(temperature=150.0))
+
+    assert "temperature" in rows[0]["sensor_faults"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("battery_level", 140.0),
+        ("battery_level", -5.0),
+        ("latitude", 200.0),
+        ("longitude", -400.0),
+    ],
+)
+def test_every_repairable_sensor_is_handled(kafka_records, telemetry, field, value):
+    """Each sensor that can fail alone is nulled and named, in both directions."""
+    rows = valid_rows(kafka_records, telemetry(**{field: value}))
+
+    assert len(rows) == 1
+    assert rows[0][field] is None
+    assert field in rows[0]["sensor_faults"]
+
+
+def test_a_healthy_reading_reports_no_sensor_faults(kafka_records, telemetry):
+    """The negative case: nothing is flagged when nothing is wrong."""
+    rows = valid_rows(kafka_records, telemetry())
+
+    assert rows[0]["sensor_faults"] is None
+
+
+def test_several_broken_sensors_are_all_named(kafka_records, telemetry):
+    rows = valid_rows(
+        kafka_records, telemetry(temperature=150.0, battery_level=-5.0)
+    )
+
+    assert "temperature" in rows[0]["sensor_faults"]
+    assert "battery_level" in rows[0]["sensor_faults"]
 
 
 def test_a_hot_bin_is_believed(kafka_records, telemetry):
@@ -103,22 +183,19 @@ def test_a_hot_bin_is_believed(kafka_records, telemetry):
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "expected"),
+    ("field", "value"),
     [
-        ("battery_level", 140.0, "battery_level_above"),
-        ("battery_level", -5.0, "battery_level_below"),
-        ("latitude", 200.0, "latitude_above"),
-        ("longitude", -400.0, "longitude_below"),
-        ("current_fill_level", -1.0, "current_fill_level_below"),
+        ("capacity", -1.0),
+        ("current_fill_level", -1.0),
     ],
 )
-def test_out_of_range_values_are_rejected(
-    kafka_records, telemetry, field, value, expected
+def test_out_of_range_tracking_fields_are_rejected(
+    kafka_records, telemetry, field, value
 ):
-    """Every contracted bound is enforced, in both directions."""
+    """A bound on a field the pipeline needs is fatal to the whole message."""
     reasons = rejections(kafka_records, telemetry(**{field: value}))
 
-    assert any(expected in reason for reason in reasons)
+    assert any(f"{field}_out_of_range" in reason for reason in reasons)
 
 
 def test_fill_level_above_capacity_is_rejected(kafka_records, telemetry):
@@ -134,7 +211,7 @@ def test_fill_level_above_capacity_is_rejected(kafka_records, telemetry):
     assert any("fill_level_exceeds_capacity" in reason for reason in reasons)
 
 
-def test_a_missing_field_is_named_in_the_reason(kafka_records, telemetry):
+def test_a_missing_tracking_field_is_named_in_the_reason(kafka_records, telemetry):
     """The reason says which field was absent."""
     payload = telemetry()
     del payload["zone"]
@@ -144,21 +221,36 @@ def test_a_missing_field_is_named_in_the_reason(kafka_records, telemetry):
     assert any("missing_zone" in reason for reason in reasons)
 
 
-def test_all_failing_checks_are_reported_together(kafka_records, telemetry):
-    """A reading gets every reason that applies, not just the first."""
-    reasons = rejections(
-        kafka_records, telemetry(temperature=500.0, battery_level=-10.0)
-    )
+def test_a_missing_sensor_reading_does_not_reject_the_message(
+    kafka_records, telemetry
+):
+    """An absent sensor is a fault to report, not a message to throw away."""
+    payload = telemetry()
+    del payload["temperature"]
 
-    assert "temperature_above" in reasons[0]
-    assert "battery_level_below" in reasons[0]
+    rows = valid_rows(kafka_records, payload)
+
+    assert len(rows) == 1
+    assert "temperature" in rows[0]["sensor_faults"]
+
+
+def test_all_failing_checks_are_reported_together(kafka_records, telemetry):
+    """A message gets every reason that applies, not just the first."""
+    payload = telemetry(capacity=-1.0)
+    del payload["zone"]
+
+    reasons = rejections(kafka_records, payload)
+
+    assert "missing_zone" in reasons[0]
+    assert "capacity_out_of_range" in reasons[0]
 
 
 def test_valid_and_rejected_partition_the_input(kafka_records, telemetry):
     """Every message ends up on exactly one side. Nothing is lost."""
     messages = [
         telemetry(bin_id="good-1"),
-        telemetry(bin_id="bad-1", temperature=999.0),
+        telemetry(bin_id="repairable", temperature=999.0),
+        telemetry(bin_id="fatal", current_fill_level=9999.0),
         "not json",
         telemetry(bin_id="good-2"),
     ]
@@ -166,7 +258,8 @@ def test_valid_and_rejected_partition_the_input(kafka_records, telemetry):
     parsed = parse(kafka_records(*messages))
     valid, rejected = split_valid_and_rejected(parsed)
 
-    assert valid.count() == 2
+    # The repairable one stays on the valid side, nulled rather than discarded
+    assert valid.count() == 3
     assert rejected.count() == 2
 
 
@@ -209,12 +302,14 @@ def test_fill_pct_is_computed_from_capacity(
 
 def test_dead_letter_carries_the_reason_and_the_original(kafka_records, telemetry):
     """A dead letter is actionable: it says why, and includes what arrived."""
-    rows = dead_letters(kafka_records(telemetry(temperature=999.0))).collect()
+    rows = dead_letters(
+        kafka_records(telemetry(current_fill_level=9999.0))
+    ).collect()
 
     assert len(rows) == 1
     envelope = json.loads(rows[0]["value"])
 
-    assert "temperature_above" in envelope["reason"]
+    assert "fill_level_exceeds_capacity" in envelope["reason"]
     assert envelope["source_partition"] == 0
     assert json.loads(envelope["payload"])["bin_id"] == "BIN-TEST-01"
 
@@ -236,7 +331,9 @@ def test_dead_letter_envelope_survives_a_hostile_payload(kafka_records):
 
 def test_dead_letter_is_keyed_by_bin_where_known(kafka_records, telemetry):
     """Keying by bin keeps one bin's bad messages together on one partition."""
-    rows = dead_letters(kafka_records(telemetry(battery_level=500.0))).collect()
+    rows = dead_letters(
+        kafka_records(telemetry(current_fill_level=9999.0))
+    ).collect()
 
     assert rows[0]["key"] == "BIN-TEST-01"
 
