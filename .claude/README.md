@@ -39,6 +39,11 @@ docker compose up -d --force-recreate data_simulator stream_processor
 `alembic upgrade head` names each revision it applies; only the two
 `Context impl` lines means the database was already at head.
 
+The order matters. Starting the simulator before migrating reports
+`The 'smart_bins' table does not exist.` with the commands to run and exits 1;
+before seeding it warns `No ACTIVE bins found`. Once running it is silent,
+because per-tick telemetry is DEBUG.
+
 The Spark UI is at <http://localhost:4040> (batch job: 4041). Its Structured
 Streaming tab is the fastest way to see whether the queries are consuming.
 

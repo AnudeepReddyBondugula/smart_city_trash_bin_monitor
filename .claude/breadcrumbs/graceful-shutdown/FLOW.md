@@ -12,3 +12,11 @@ SIGINT or SIGTERM
 ```
 
 Windows uses `signal.signal`; other platforms use event-loop signal handlers.
+
+Cleanup runs from a `finally`, so it happens whether startup succeeded or not.
+It previously sat after the shutdown wait, which never runs if startup raises -
+a failed start therefore leaked the Kafka producer and the process died
+complaining about that instead of about the real problem.
+
+Each step is separately guarded, so one failing step cannot skip the ones after
+it. A normal shutdown ends with `Shutdown complete`, no warnings, exit code 0.

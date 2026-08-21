@@ -220,6 +220,23 @@ window lands. Lower `WATERMARK` for a faster demo.
 
 ---
 
+## Order matters
+
+The four steps above are a sequence, not a menu. Starting the simulator against
+a database that has not been migrated is the single most common mistake, so both
+bad states say what to do rather than failing obscurely:
+
+| State | What you get |
+|---|---|
+| Not migrated | `The 'smart_bins' table does not exist.` plus the two commands to run. Exits 1, cleanly. |
+| Migrated, not seeded | `No ACTIVE bins found, so nothing will be published.` plus the seed command. Keeps running. |
+| Migrated and seeded | `Injected faults into N of M bin(s).` then `Started M simulator(s).` |
+
+If you see a raw SQLAlchemy traceback instead of the first message, the image is
+stale — `docker compose build data_simulator`.
+
+---
+
 ## Verification & Debugging
 
 **View Simulator Logs:**
@@ -227,6 +244,14 @@ window lands. Lower `WATERMARK` for a faster demo.
 ```bash
 docker logs data_simulator -f
 ```
+
+A healthy simulator is **silent after startup**. Per-tick telemetry is logged at
+DEBUG, so `-f` showing nothing means it is working, not stalled. To watch actual
+activity, consume from Kafka (below) or query `bin_state_latest`. On a native
+process, `kill -USR1 <pid>` toggles debug logging.
+
+The last line on a normal shutdown is `Shutdown complete`, with no warnings and
+exit code 0.
 
 **Spark UI:** <http://localhost:4040> — the Structured Streaming tab shows what
 each query is actually doing.
@@ -248,6 +273,13 @@ docker exec smartbin_kafka kafka-console-consumer \
 
 Do not add `--from-beginning` when validating the current payload schema; it
 also replays historical records created before newer fields existed.
+
+**Confirm both services came up:**
+
+```bash
+docker logs data_simulator   2>&1 | grep -E "Injected|Started .* simulator"
+docker logs stream_processor 2>&1 | grep -E "Started 4 streaming|UI on port"
+```
 
 **Verify the processing layer:**
 

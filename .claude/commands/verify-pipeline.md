@@ -68,6 +68,18 @@ docker logs stream_processor 2>&1 | grep -E "Started 4 streaming|schema applied"
 
 `Injected faults into N of M bin(s).` must appear, or no detector will fire.
 
+The steps above are a sequence. Starting the simulator before migrating is the
+most common mistake, and it reports itself:
+
+| State | Log line |
+|---|---|
+| Not migrated | `The 'smart_bins' table does not exist.` — exits 1 |
+| Not seeded | `No ACTIVE bins found, so nothing will be published.` |
+| Ready | `Injected faults into N of M bin(s).` |
+
+After that the simulator is silent — per-tick telemetry is DEBUG, so `-f`
+showing nothing means it is working.
+
 Then open the Spark UI at <http://localhost:4040> and check the **Structured
 Streaming** tab lists all four queries with a non-zero input rate. That is the
 fastest confirmation the pipeline is actually consuming, and it is quicker than
