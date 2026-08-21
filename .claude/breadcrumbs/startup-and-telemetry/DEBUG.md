@@ -25,3 +25,6 @@ docker exec smartbin_kafka kafka-console-consumer \
 ```
 
 Runtime fleet size comes from active rows, not `NUMBER_OF_BINS`.
+
+Some bins are silent, frozen or publishing impossible values on purpose. Before
+treating that as a bug, check [`fault-injection`](../fault-injection/DEBUG.md).

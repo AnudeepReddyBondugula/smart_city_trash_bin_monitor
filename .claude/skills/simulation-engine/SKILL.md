@@ -39,3 +39,27 @@ rounded to two decimals.
   simulator after database changes.
 - Kafka send failures are logged and dropped; there is no retry queue.
 - `NUMBER_OF_BINS` does not control runtime fleet size; active database rows do.
+
+## Fault injection
+
+A share of bins misbehave on purpose (`FAULT_INJECTION_RATE`), because the
+detectors downstream otherwise have nothing to detect. `FAULT_MODES` and
+`assign_fault_modes()` are in `src/simulator/bin_simulator.py`; assignment
+cycles rather than drawing per bin, so a small fleet cannot end up missing a
+mode entirely.
+
+State-level faults are applied in `_simulate()` — the bin really behaves that
+way. Reporting-level faults are applied in `_next_payload()` — the bin is fine,
+the telemetry is not. A broken sensor belongs in the second group.
+
+## Pacing
+
+Fill is a percentage of capacity per tick, so bins of every size cross
+percentage thresholds at the same pace. `COLLECTION_THRESHOLD_PCT` must stay
+above the consumer's critical threshold of 80, or bins are emptied on the way up
+and never once register as critical.
+
+Defaults are paced for a real bin (~75 minutes to critical). `.env.local.example`
+carries a demo profile that compresses it to minutes.
+
+See the `fault-injection` breadcrumb for the full trace.

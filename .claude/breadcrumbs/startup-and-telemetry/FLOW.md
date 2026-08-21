@@ -8,12 +8,17 @@ setup logging
   → create SimulationManager
   → SELECT active SmartBin rows
   → build Bin with capacity, coordinates, and zone
+  → assign_fault_modes over the whole fleet
   → start one BinSimulator asyncio task per row
   → each tick updates fill, battery, and temperature
   → Bin.to_payload adds static metadata and UTC timestamp
+  → _next_payload may suppress, repeat, or corrupt it
   → publish JSON to KAFKA_TOPIC keyed by bin_id
   → sleep SIMULATION_INTERVAL
 ```
+
+A share of bins misbehave on purpose so the detectors downstream have something
+to detect. See [`fault-injection`](../fault-injection/FLOW.md).
 
 The manager loads the database once. Seeded or edited rows require a process
 restart; after rebuilding a Docker image, use `docker compose up -d
