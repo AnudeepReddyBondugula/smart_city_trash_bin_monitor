@@ -158,7 +158,9 @@ def main() -> None:
     setup_logging()
     logger.info("Starting nightly rollups over %s", settings.PARQUET_PATH)
 
-    session = build_session()
+    # Its own UI port: this runs alongside the streaming application, which
+    # already holds the default one.
+    session = build_session(ui_port=settings.SPARK_BATCH_UI_PORT)
 
     try:
         history = load_history(session)

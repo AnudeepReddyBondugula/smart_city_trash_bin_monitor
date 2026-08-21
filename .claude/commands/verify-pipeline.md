@@ -53,8 +53,8 @@ docker compose run --rm data_simulator python src/seed.py --count 200 --clear
 docker compose up -d data_simulator stream_processor
 ```
 
-Note `alembic upgrade head` prints nothing — `alembic.ini` has no logging
-sections. A successful seed is the confirmation that it ran.
+`alembic upgrade head` names each revision it applies. Only the two
+`Context impl` lines means the database was already at head.
 
 Always `build` before `up`. A stale image is the most common cause of "the
 change did nothing".
@@ -67,6 +67,11 @@ docker logs stream_processor 2>&1 | grep -E "Started 4 streaming|schema applied"
 ```
 
 `Injected faults into N of M bin(s).` must appear, or no detector will fire.
+
+Then open the Spark UI at <http://localhost:4040> and check the **Structured
+Streaming** tab lists all four queries with a non-zero input rate. That is the
+fastest confirmation the pipeline is actually consuming, and it is quicker than
+waiting on any table.
 
 ## Check the outputs
 

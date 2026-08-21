@@ -36,8 +36,11 @@ docker compose run --rm data_simulator python src/seed.py --count 200
 docker compose up -d --force-recreate data_simulator stream_processor
 ```
 
-`alembic upgrade head` prints nothing — `alembic.ini` carries no logging
-sections. A successful seed is the confirmation that it ran.
+`alembic upgrade head` names each revision it applies; only the two
+`Context impl` lines means the database was already at head.
+
+The Spark UI is at <http://localhost:4040> (batch job: 4041). Its Structured
+Streaming tab is the fastest way to see whether the queries are consuming.
 
 To verify the whole pipeline rather than just start it, use `/verify-pipeline`.
 

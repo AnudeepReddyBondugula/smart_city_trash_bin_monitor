@@ -55,6 +55,18 @@ One application, four queries, one separate batch entry point.
   would reject the readings a rule exists to catch — a bin above 70 °C is
   exactly what fire risk looks for.
 
+## The Spark UI
+
+<http://localhost:4040>, published from the container. The **Structured
+Streaming** tab is the one that matters: input and processing rate, batch
+duration, watermark position and state store size per query, none of which the
+logs report. Open it before guessing why a query looks stalled.
+
+The batch job binds <http://localhost:4041> instead, because it runs alongside
+the streaming application. Both are set explicitly with
+`spark.ui.portMaxRetries=0`, so a bind failure is loud rather than a silent move
+to another port.
+
 ## Testing
 
 The rules are plain Python over dictionaries and pandas, so most of the suite

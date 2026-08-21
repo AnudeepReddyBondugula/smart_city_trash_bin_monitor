@@ -68,3 +68,17 @@ def test_temperature_range_admits_a_fire_risk_reading():
 def test_required_fields_match_the_contract():
     """Every property is required; the contract does not carry optional fields."""
     assert set(required_fields()) == set(load_contract()["properties"])
+
+
+def test_the_batch_job_does_not_take_the_streaming_ui_port():
+    """The two applications run together and need separate UI ports.
+
+    Sharing one means the batch job is pushed onto whatever Spark finds free,
+    so the address changes run to run and the log carries a warning that reads
+    like a fault.
+    """
+    from config import get_settings
+
+    settings = get_settings()
+
+    assert settings.SPARK_UI_PORT != settings.SPARK_BATCH_UI_PORT

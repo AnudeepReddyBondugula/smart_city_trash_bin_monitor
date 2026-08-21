@@ -29,7 +29,20 @@ this pipeline cannot.
 | Bins missing from `bin_state_latest` | Their messages are being dead-lettered. Query the DLQ and compare bin IDs (below). |
 | Rows duplicated in an output table | A conflict key is missing or wrong in `sql/schema.sql`. Retried micro-batches rely on it. |
 | Query fails on restart after a code change | `STATE_SCHEMA` changed. Spark cannot restore state written under a different schema — delete the `bin_state` checkpoint. |
-| `SparkUI could not bind on port 4040` | The streaming app holds it; the batch job took 4041. Harmless. |
+| `SparkUI could not bind on port ...` | Ports are now bound explicitly with no retry, so this means something else already holds it. Check for a second stream-processor container. |
+
+## Start at the Spark UI
+
+<http://localhost:4040>, **Structured Streaming** tab. Per query it reports
+input rate, processing rate, batch duration, watermark position and state store
+size — none of which appears in the logs, and all of which answers "is this
+query stalled, starved, or just waiting for the watermark" faster than any
+query against PostgreSQL.
+
+The batch job is on <http://localhost:4041> while it runs.
+
+If a query is missing from that tab it never started; check the logs for the
+`Started 4 streaming quer(ies)` line.
 
 ## Checkpoints are not a cache
 

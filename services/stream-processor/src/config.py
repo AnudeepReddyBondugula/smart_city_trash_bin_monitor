@@ -60,6 +60,18 @@ class Settings(BaseSettings):
     SPARK_MASTER: str = "local[*]"
     SPARK_APP_NAME: str = "smartbin-stream-processor"
 
+    # The Spark UI, which is the only place the streaming queries report what
+    # they are actually doing: input rate, batch duration, watermark position
+    # and state store size per query. Worth having published rather than left
+    # inside the container where nothing can reach it.
+    SPARK_UI_PORT: int = 4040
+
+    # The nightly batch job gets its own port. It runs alongside the streaming
+    # application, and without a separate port it silently lands on whatever
+    # Spark finds free after retrying - so the address changes run to run and
+    # the log carries a warning that reads like a fault.
+    SPARK_BATCH_UI_PORT: int = 4041
+
     # ---------------------------------------------------------------------
     # Detection thresholds
     #

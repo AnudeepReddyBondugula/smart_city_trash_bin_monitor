@@ -28,7 +28,7 @@ def ensure_worker_interpreter() -> None:
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
 
 
-def build_session() -> SparkSession:
+def build_session(ui_port: int | None = None) -> SparkSession:
     """
     Build the Spark session the streaming queries run in.
 
@@ -45,8 +45,19 @@ def build_session() -> SparkSession:
     and workers, and skipping the cluster removes three containers and a network
     from the deployment. This is the setting to revisit first when one machine
     measurably runs out - not before.
+
+    Args:
+        ui_port:
+            Port for the Spark UI. Defaults to ``SPARK_UI_PORT``. The batch job
+            passes its own, because it runs alongside the streaming application
+            and would otherwise be pushed onto whichever port Spark found free -
+            a different address every run, announced by a warning that reads
+            like a fault.
     """
     ensure_worker_interpreter()
+
+    if ui_port is None:
+        ui_port = settings.SPARK_UI_PORT
 
     session = (
         SparkSession.builder.appName(settings.SPARK_APP_NAME)
@@ -65,15 +76,20 @@ def build_session() -> SparkSession:
         # spent scheduling than processing.
         .config("spark.sql.shuffle.partitions", "12")
         .config("spark.sql.session.timeZone", "UTC")
+        # Bound explicitly so the UI is always at a known address. Left to
+        # Spark's default retry, a busy port moves it silently.
+        .config("spark.ui.port", str(ui_port))
+        .config("spark.ui.portMaxRetries", "0")
         .getOrCreate()
     )
 
     session.sparkContext.setLogLevel("WARN")
 
     logger.info(
-        "Spark %s session started on %s",
+        "Spark %s session started on %s, UI on port %d",
         session.version,
         settings.SPARK_MASTER,
+        ui_port,
     )
     return session
 

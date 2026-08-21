@@ -103,6 +103,17 @@ services:
     # producer and the consumer cannot end up pointed at different topics.
     env_file:
       - ./services/data-simulator/.env.docker
+    ports:
+      # The Spark UI. This is the only place the streaming queries report input
+      # rate, batch duration, watermark position and state store size per query
+      # - the Structured Streaming tab is the first thing to open when a query
+      # looks stalled. Unpublished it runs, but nothing outside the container
+      # can reach it.
+      #
+      # 4040 is the streaming application; 4041 is the nightly batch job, which
+      # runs alongside it and needs a port of its own.
+      - "4040:4040"
+      - "4041:4041"
     depends_on:
       postgres:
         condition: service_healthy

@@ -79,6 +79,15 @@ docker compose run --rm data_simulator alembic upgrade head
 docker compose run --rm data_simulator python src/seed.py --count 50
 ```
 
+The upgrade names every revision it applies:
+
+```text
+INFO  [alembic.runtime.migration] Running upgrade  -> 9b7a1e20a036, Create the initial smart_bins schema.
+INFO  [alembic.runtime.migration] Running upgrade 9b7a1e20a036 -> 0002_add_zone, Add zone to smart_bins and backfill existing rows.
+```
+
+Only the two `Context impl` lines means the database was already at head.
+
 List migration history and mark the database's current revision:
 
 ```bash
@@ -116,6 +125,18 @@ The stream processor applies `services/stream-processor/sql/schema.sql` on
 startup — it is idempotent, so restarting never destroys accumulated history —
 and then starts four streaming queries: `bin_events`, `dead_letters`,
 `zone_metrics` and `bin_state`.
+
+### The Spark UI
+
+**<http://localhost:4040>** — and its **Structured Streaming** tab is the first
+place to look when a query seems stalled. It reports per query: input rate,
+processing rate, batch duration, watermark position and state store size. None
+of that appears in the logs.
+
+The nightly batch job runs alongside the streaming application and gets its own
+port, **<http://localhost:4041>**, for as long as it runs. Both are bound
+explicitly (`SPARK_UI_PORT`, `SPARK_BATCH_UI_PORT`) rather than left to Spark's
+retry, so the address never moves.
 
 ---
 
@@ -206,6 +227,9 @@ window lands. Lower `WATERMARK` for a faster demo.
 ```bash
 docker logs data_simulator -f
 ```
+
+**Spark UI:** <http://localhost:4040> — the Structured Streaming tab shows what
+each query is actually doing.
 
 **Verify Postgres Data:**
 
