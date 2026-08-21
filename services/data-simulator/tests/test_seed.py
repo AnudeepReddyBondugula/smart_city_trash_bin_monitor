@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.seed import seed_db
+from src.seed import HYDERABAD_CENTER, ZONE_OFFSETS, seed_db
 
 # NOTE: import SmartBin the same way seed.py does (`from database import ...`).
 # Because `src/` has no __init__.py, `database.SmartBin` and `src.database.SmartBin`
@@ -51,7 +51,14 @@ async def test_seed_creates_bins_and_commits(mock_create_engine, mock_async_sess
     assert mock_session.add.call_count == 3
     # All added objects are SmartBin instances
     for call_args in mock_session.add.call_args_list:
-        assert isinstance(call_args.args[0], SmartBin)
+        bin_instance = call_args.args[0]
+        assert isinstance(bin_instance, SmartBin)
+        assert bin_instance.zone in ZONE_OFFSETS
+        latitude_offset, longitude_offset = ZONE_OFFSETS[bin_instance.zone]
+        assert HYDERABAD_CENTER[0] + latitude_offset[0] <= bin_instance.latitude
+        assert bin_instance.latitude <= HYDERABAD_CENTER[0] + latitude_offset[1]
+        assert HYDERABAD_CENTER[1] + longitude_offset[0] <= bin_instance.longitude
+        assert bin_instance.longitude <= HYDERABAD_CENTER[1] + longitude_offset[1]
     mock_session.commit.assert_awaited()
     mock_engine.dispose.assert_awaited_once()
 

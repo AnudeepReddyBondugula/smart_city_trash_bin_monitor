@@ -32,13 +32,29 @@ _(The simulator will not emit telemetry until the database is migrated and seede
 
 ### 3. Database Migration & Seeding
 
-Initialize the schema and seed mock data using a one-off container:
+Apply all versioned migrations and seed mock data using one-off containers:
 
 ```bash
+docker compose run --rm data_simulator alembic upgrade head
 docker compose run --rm data_simulator python src/seed.py --count 50
 ```
 
 _(To reset the database later, append `--clear` to the seed command)._
+
+If the database was created before Alembic was introduced, mark its existing
+schema as the baseline before upgrading. This preserves its rows while adding
+the new columns:
+
+```bash
+docker compose run --rm data_simulator alembic stamp 0001_initial_schema
+docker compose run --rm data_simulator alembic upgrade head
+```
+
+To roll back only the zone migration on a disposable database:
+
+```bash
+docker compose run --rm data_simulator alembic downgrade 0001_initial_schema
+```
 
 ### 4. Restart Simulator
 
@@ -61,7 +77,7 @@ docker logs data_simulator -f
 **Verify Postgres Data:**
 
 ```bash
-docker exec -it smartbin_postgres psql -U postgres -d smart_city -c "SELECT bin_id, capacity, latitude, longitude, status FROM smart_bins LIMIT 10;"
+docker exec -it smartbin_postgres psql -U postgres -d smart_city -c "SELECT bin_id, capacity, latitude, longitude, zone, status FROM smart_bins LIMIT 10;"
 ```
 
 **Consume Live Kafka Stream:**

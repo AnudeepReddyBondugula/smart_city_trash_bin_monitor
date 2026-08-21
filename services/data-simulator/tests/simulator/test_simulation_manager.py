@@ -11,7 +11,7 @@ def sim_manager():
 
 @pytest.fixture
 def bin_instance():
-    return Bin("bin_1", 100.0, 10.0, 20.0)
+    return Bin("bin_1", 100.0, 10.0, 20.0, "NORTH")
 
 @pytest.mark.asyncio
 @patch('src.simulator.simulation_manager.AsyncSessionLocal')
@@ -26,7 +26,14 @@ async def test_initialize(mock_session_maker, sim_manager):
     mock_session_maker.return_value.__aenter__.return_value = mock_session
     
     mock_result = MagicMock()
-    mock_db_bin = SmartBin(bin_id="db_bin_1", latitude=1.0, longitude=2.0, capacity=50.0, status="ACTIVE")
+    mock_db_bin = SmartBin(
+        bin_id="db_bin_1",
+        latitude=1.0,
+        longitude=2.0,
+        capacity=50.0,
+        zone="EAST",
+        status="ACTIVE",
+    )
     mock_result.scalars().all.return_value = [mock_db_bin]
     mock_session.execute.return_value = mock_result
     
@@ -39,6 +46,7 @@ async def test_initialize(mock_session_maker, sim_manager):
         assert len(sim_manager._simulators) == 1
         assert "db_bin_1" in sim_manager._simulators
         mock_sim_instance.start.assert_called_once()
+        assert MockSimulator.call_args.args[0].zone == "EAST"
 
         # Verify the query passed to session.execute filters ACTIVE bins only
         executed_stmt = mock_session.execute.call_args.args[0]

@@ -25,6 +25,7 @@ class SmartBin(Base):
     capacity: Mapped[float] = mapped_column(Float, nullable=False)
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    zone: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

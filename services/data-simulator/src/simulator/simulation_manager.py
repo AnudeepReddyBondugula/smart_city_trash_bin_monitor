@@ -52,6 +52,7 @@ class SimulationManager:
                     latitude=db_bin.latitude,
                     longitude=db_bin.longitude,
                     capacity=db_bin.capacity,
+                    zone=db_bin.zone,
                 )
 
                 simulator = BinSimulator(bin)
