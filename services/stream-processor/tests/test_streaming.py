@@ -14,7 +14,8 @@ import json
 import pytest
 from pyspark.sql.functions import col, lit
 
-from pipeline.clean import clean_events
+from pipeline.bin_state import evaluate
+from pipeline.clean import clean_events, dead_letters
 from pipeline.zone_metrics import aggregate
 
 
@@ -164,7 +165,7 @@ def test_the_stateful_operator_runs_under_spark(run_stream, telemetry):
     operator yields match the declared output schema, and that grouping by bin
     reaches the function at all.
     """
-    from pipeline.bin_state import RECORD_ALERT, RECORD_STATE, evaluate
+    from pipeline.bin_state import RECORD_ALERT, RECORD_STATE
 
     def transform(raw):
         return evaluate(clean_events(raw))
@@ -223,3 +224,40 @@ def test_zone_windows_aggregate_readings(run_stream, telemetry):
     # One bin in three is at 90%, which is over the critical threshold
     assert first["critical_readings"] > 0
     assert first["max_fill_pct"] == pytest.approx(90.0)
+
+
+def test_a_zero_capacity_message_is_dead_lettered_not_processed(
+    run_stream, telemetry
+):
+    """The end-to-end version of the crash this fixed.
+
+    A zero capacity divided to a null fill percentage, which the stateful
+    operator compared against a threshold, which raised in the Python worker
+    and terminated the streaming application. The message must be dead-lettered
+    before it reaches any of that, and the healthy bin beside it must survive.
+    """
+    letters = run_stream(
+        dead_letters,
+        [telemetry(bin_id="BIN-OK"), telemetry(bin_id="BIN-ZERO", capacity=0.0)],
+        "dlq_zero_capacity",
+    )
+
+    assert len(letters) == 1
+    assert letters[0]["key"] == "BIN-ZERO"
+    assert "capacity_out_of_range" in json.loads(letters[0]["value"])["reason"]
+
+
+def test_the_operator_survives_the_message_that_used_to_kill_it(
+    run_stream, telemetry
+):
+    """The stateful query runs to completion with the bad message in the batch."""
+    rows = run_stream(
+        lambda raw: evaluate(clean_events(raw)),
+        [
+            telemetry(bin_id="BIN-ZERO", capacity=0.0),
+            telemetry(bin_id="BIN-OK", current_fill_level=90.0),
+        ],
+        "state_zero_capacity",
+    )
+
+    assert {row["bin_id"] for row in rows} == {"BIN-OK"}

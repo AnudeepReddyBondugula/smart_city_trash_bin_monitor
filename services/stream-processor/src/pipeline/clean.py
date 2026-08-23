@@ -24,6 +24,7 @@ from pyspark.sql.functions import (
     to_date,
     to_json,
     to_timestamp,
+    trim,
     when,
 )
 
@@ -31,6 +32,7 @@ from config import get_settings
 from schema import (
     EVENT_TIME_COLUMN,
     EVENT_TIME_FIELD,
+    non_empty_fields,
     range_rules,
     telemetry_schema,
 )
@@ -100,12 +102,22 @@ def parse(raw: DataFrame) -> DataFrame:
     )
 
 
-def _out_of_range(field: str, minimum, maximum):
-    """A condition matching values the contract says are impossible."""
+def _out_of_range(field: str, minimum, maximum, minimum_exclusive=False):
+    """
+    A condition matching values the contract says are impossible.
+
+    `minimum_exclusive` is the difference between "at least zero" and "more
+    than zero", which for capacity is the difference between a usable reading
+    and a division that produces nothing.
+    """
     condition = None
 
     if minimum is not None:
-        condition = col(field) < lit(minimum)
+        condition = (
+            col(field) <= lit(minimum)
+            if minimum_exclusive
+            else col(field) < lit(minimum)
+        )
     if maximum is not None:
         above = col(field) > lit(maximum)
         condition = above if condition is None else condition | above
@@ -115,7 +127,9 @@ def _out_of_range(field: str, minimum, maximum):
 
 def _bounds() -> dict:
     """The contract's numeric bounds, keyed by field."""
-    return {field: (low, high) for field, low, high in range_rules()}
+    return {
+        field: (low, high, exclusive) for field, low, high, exclusive in range_rules()
+    }
 
 
 def rejection_reason(parsed: DataFrame):
@@ -150,10 +164,18 @@ def rejection_reason(parsed: DataFrame):
             continue
         reasons.append(when(col(field).isNull(), lit(f"missing_{field}")))
 
-        minimum, maximum = bounds.get(field, (None, None))
-        condition = _out_of_range(field, minimum, maximum)
+        minimum, maximum, exclusive = bounds.get(field, (None, None, False))
+        condition = _out_of_range(field, minimum, maximum, exclusive)
         if condition is not None:
             reasons.append(when(condition, lit(f"{field}_out_of_range")))
+
+    # An identifier made of nothing is not a missing identifier - it survives
+    # every null check and then groups unrelated events under one empty state
+    # key. The contract already says these carry at least one character.
+    for field in non_empty_fields():
+        if field not in TRACKING_FIELDS:
+            continue
+        reasons.append(when(trim(col(field)) == lit(""), lit(f"empty_{field}")))
 
     reasons.append(
         when(col(EVENT_TIME_COLUMN).isNull(), lit("unparseable_timestamp"))
@@ -187,8 +209,8 @@ def sensor_fault_reason(parsed: DataFrame):
     faults = []
 
     for field in REPAIRABLE_FIELDS:
-        minimum, maximum = bounds.get(field, (None, None))
-        condition = _out_of_range(field, minimum, maximum)
+        minimum, maximum, exclusive = bounds.get(field, (None, None, False))
+        condition = _out_of_range(field, minimum, maximum, exclusive)
 
         if condition is not None:
             faults.append(when(condition, lit(field)))
@@ -212,8 +234,8 @@ def repair(flagged: DataFrame) -> DataFrame:
     repaired = flagged
 
     for field in REPAIRABLE_FIELDS:
-        minimum, maximum = bounds.get(field, (None, None))
-        condition = _out_of_range(field, minimum, maximum)
+        minimum, maximum, exclusive = bounds.get(field, (None, None, False))
+        condition = _out_of_range(field, minimum, maximum, exclusive)
 
         if condition is None:
             continue

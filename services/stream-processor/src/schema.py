@@ -56,12 +56,19 @@ def telemetry_schema() -> StructType:
 
 
 @lru_cache
-def range_rules() -> tuple[tuple[str, float | None, float | None], ...]:
-    """The numeric bounds the contract declares, as (field, minimum, maximum).
+def range_rules() -> tuple[tuple[str, float | None, float | None, bool], ...]:
+    """
+    The numeric bounds the contract declares.
 
-    Used to build the validation step, so the ranges a reading is checked
-    against are the published ones rather than a second set that can drift from
-    them.
+    Each rule is (field, minimum, maximum, minimum_is_exclusive). Used to build
+    the validation step, so the ranges a reading is checked against are the
+    published ones rather than a second set that can drift from them.
+
+    The exclusivity flag is carried rather than flattened away. `capacity` is
+    declared `exclusiveMinimum: 0`, and treating that as inclusive lets a
+    zero-capacity message through - which divides to a null fill percentage and
+    kills the stateful query, since every fill rule compares that number
+    against a threshold.
     """
     rules = []
 
@@ -69,15 +76,32 @@ def range_rules() -> tuple[tuple[str, float | None, float | None], ...]:
         if spec["type"] != "number":
             continue
 
-        minimum = spec.get("minimum", spec.get("exclusiveMinimum"))
+        exclusive = spec.get("exclusiveMinimum")
+        minimum = spec.get("minimum", exclusive)
         maximum = spec.get("maximum")
 
         if minimum is None and maximum is None:
             continue
 
-        rules.append((name, minimum, maximum))
+        rules.append((name, minimum, maximum, exclusive is not None))
 
     return tuple(rules)
+
+
+@lru_cache
+def non_empty_fields() -> tuple[str, ...]:
+    """
+    String fields the contract says must carry at least one character.
+
+    Null is not the only way an identifier can be useless. An empty `bin_id`
+    parses, passes a null check, and then becomes a single shared state key
+    that unrelated malformed events all group under.
+    """
+    return tuple(
+        name
+        for name, spec in load_contract()["properties"].items()
+        if spec["type"] == "string" and spec.get("minLength", 0) > 0
+    )
 
 
 @lru_cache

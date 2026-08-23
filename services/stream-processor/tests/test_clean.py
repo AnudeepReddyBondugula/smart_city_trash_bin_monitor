@@ -353,7 +353,7 @@ def test_dead_letter_key_falls_back_when_the_bin_is_unknown(kafka_records):
 def test_history_is_partitioned_by_event_date(spark, kafka_records, telemetry):
     """The history carries the date column it is partitioned by.
 
-    Partitioning by date is what lets the nightly job read one day without
+    Partitioning by date is what lets the batch job read one day without
     scanning the whole history.
     """
     parsed = parse(kafka_records(telemetry()))
@@ -370,3 +370,59 @@ def test_clean_columns_are_what_downstream_queries_expect():
     """The published column list contains everything the rules need."""
     for needed in ("bin_id", "zone", "fill_pct", "temperature", "battery_level"):
         assert needed in CLEAN_COLUMNS
+
+
+# ---------------------------------------------------------------------------
+# Regressions found in review
+# ---------------------------------------------------------------------------
+
+
+def test_a_zero_capacity_reading_is_rejected(kafka_records, telemetry):
+    """The contract says capacity is greater than zero, and it must be enforced.
+
+    Accepted, it divides to a null fill percentage, and every fill rule in the
+    stateful operator compares that null against a threshold - which raises in
+    the Python worker and takes the whole streaming application down. One
+    message was enough.
+    """
+    reasons = rejections(kafka_records, telemetry(capacity=0.0))
+
+    assert "capacity_out_of_range" in reasons[0]
+
+
+def test_a_positive_capacity_is_still_accepted(kafka_records, telemetry):
+    """The exclusive bound must reject zero without rejecting small bins."""
+    rows = valid_rows(kafka_records, telemetry(capacity=0.5, current_fill_level=0.25))
+
+    assert len(rows) == 1
+    assert rows[0]["capacity"] == 0.5
+
+
+def test_an_empty_bin_id_is_rejected(kafka_records, telemetry):
+    """Empty is not null, and it passed every null check.
+
+    All such events then group under one empty key in the stateful operator, so
+    unrelated bins share a single state entry.
+    """
+    reasons = rejections(kafka_records, telemetry(bin_id=""))
+
+    assert "empty_bin_id" in reasons[0]
+
+
+def test_a_whitespace_zone_is_rejected(kafka_records, telemetry):
+    reasons = rejections(kafka_records, telemetry(zone="   "))
+
+    assert "empty_zone" in reasons[0]
+
+
+def test_no_valid_reading_can_divide_to_a_null_fill_percentage(kafka_records, telemetry):
+    """The one guarantee the stateful operator relies on and cannot check.
+
+    fill_pct is computed as a guarded division, so a capacity of zero would
+    reach the operator as a null. Validation is what makes that unreachable.
+    """
+    rows = valid_rows(
+        kafka_records, telemetry(), telemetry(capacity=240.0), telemetry(capacity=0.0)
+    )
+
+    assert all(row["capacity"] > 0 for row in rows)
