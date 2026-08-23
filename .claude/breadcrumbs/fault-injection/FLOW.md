@@ -24,7 +24,7 @@ be written but never once observed working.
 | `DUPLICATE` | `_next_payload` | deduplication |
 | `HOT` | `_simulate_temperature` | `FIRE_RISK` |
 | `JUMP` | `_simulate_fill` | `ANOMALY_JUMP` |
-| `UNCOLLECTED` | `_simulate_fill` | `SLA_BREACH` |
+| `UNCOLLECTED` | `_simulate_fill` | `SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW` |
 
 Assignment cycles rather than drawing per bin. Independent draws can leave a
 small fleet with no `HOT` bin at all, so no fire alert appears anywhere in the

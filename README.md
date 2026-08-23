@@ -118,7 +118,7 @@ docker compose run --rm data_simulator alembic downgrade 9b7a1e20a036
 ### 4. Start the Services
 
 ```bash
-docker compose up -d --force-recreate data_simulator stream_processor
+docker compose up -d --force-recreate data_simulator stream_processor rollups
 ```
 
 The stream processor applies `services/stream-processor/sql/schema.sql` on
@@ -133,8 +133,9 @@ place to look when a query seems stalled. It reports per query: input rate,
 processing rate, batch duration, watermark position and state store size. None
 of that appears in the logs.
 
-The nightly batch job runs alongside the streaming application and gets its own
-port, **<http://localhost:4041>**, for as long as it runs. Both are bound
+The rollup job runs in its own container alongside the streaming application
+and gets its own port, **<http://localhost:4041>**, for as long as each run
+lasts. Both are bound
 explicitly (`SPARK_UI_PORT`, `SPARK_BATCH_UI_PORT`) rather than left to Spark's
 retry, so the address never moves.
 
@@ -142,14 +143,14 @@ retry, so the address never moves.
 
 ## The Processing Layer
 
-One Spark application, four queries, one nightly batch job.
+One Spark application with four streaming queries, plus a batch job on a timer.
 
 | Query | Writes | Answers |
 |---|---|---|
-| `bin_events` | Parquet, partitioned by date | The history the nightly job reads |
+| `bin_events` | Parquet, partitioned by date | The history the batch job reads |
 | `dead_letters` | `smartbin-telemetry-dlq` | Messages that could not be parsed or believed |
 | `zone_metrics` | `zone_metrics_5m` | Per-zone rollups, at every grain, by SQL |
-| `bin_state` | `bin_alerts`, `bin_state_latest` | Eleven alert types from one per-bin state read |
+| `bin_state` | `bin_alerts`, `bin_state_latest` | Twelve alert types from one per-bin state read |
 | `batch/rollups.py` | `zone_hourly_profile`, `zone_daily_trend` | Peak hours and long-range trends |
 
 Dashboard figures are the `city_kpi` and `zone_leaderboard` views over those
@@ -157,7 +158,17 @@ tables — no Spark job of their own.
 
 Alert types: `CRITICAL_FILL`, `OVERFLOW`, `PREDICTED_OVERFLOW`, `FIRE_RISK`,
 `LOW_BATTERY`, `OFFLINE`, `COLLECTED`, `ANOMALY_JUMP`, `SENSOR_STUCK`,
-`SENSOR_FAULT`, `SLA_BREACH`.
+`SENSOR_FAULT`, `SLA_BREACH_CRITICAL`, `SLA_BREACH_OVERFLOW`.
+
+The two SLA breaches are separate types rather than one with a label. Both
+clocks can come due on the same reading, and `bin_alerts` is keyed on
+`(bin_id, alert_type, fired_at)` — under a shared type the second row collided
+with the first and was dropped on insert.
+
+The thresholds these rules use are also what builds `city_kpi` and
+`zone_leaderboard`, filled in when the schema is applied. Changing a threshold
+therefore needs the stream processor restarted, and the dashboard cannot drift
+away from the alerts.
 
 ### One bad sensor does not lose the bin
 
@@ -179,7 +190,15 @@ plausible number no sensor reported and then averages it into the zone
 temperature as though it were real.
 
 `city_kpi.faulty_sensor_bins` counts these. They stay in every other figure too,
-which is the point.
+which is the point. A second sensor failing later raises its own alert — the
+pipeline remembers *which* sensors it has reported, not merely that it reported
+one.
+
+A message whose `capacity` is zero is fatal, not repairable. It divides to a
+null fill percentage, and every fill rule compares that number against a
+threshold — which raises in the Spark worker and stops the application. The
+contract declares `exclusiveMinimum: 0` and validation enforces the
+exclusivity.
 
 ### Fault injection
 
@@ -196,7 +215,7 @@ observed working.
 | `DUPLICATE` | re-sends the previous event verbatim | deduplication |
 | `HOT` | runs hot in proportion to how full it is | `FIRE_RISK` |
 | `JUMP` | one large but legal fill jump | `ANOMALY_JUMP` |
-| `UNCOLLECTED` | the truck never comes | `SLA_BREACH` |
+| `UNCOLLECTED` | the truck never comes | `SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW` |
 
 Modes are assigned by cycling rather than drawing per bin, so a small fleet
 cannot end up with no hot bin and therefore no fire alert anywhere in the run.
@@ -299,11 +318,12 @@ docker exec smartbin_kafka kafka-console-consumer \
 # The Parquet history, partitioned by date
 docker exec stream_processor ls /data/bin_events
 
-# The nightly rollups, on demand
-docker compose exec stream_processor python src/batch/rollups.py
+# The rollups. The `rollups` container runs this every
+# ROLLUP_INTERVAL_SECONDS (default 900); this is only to see one immediately.
+docker compose run --rm rollups python src/batch/rollups.py
 ```
 
-With fault injection on, all eleven alert types should appear in that first
+With fault injection on, all twelve alert types should appear in that first
 query, and `city_kpi.total_bins` should equal the number you seeded. If it is
 short, some bins are being dead-lettered — compare the DLQ bin IDs against
 `bin_state_latest`.
@@ -322,7 +342,7 @@ short, some bins are being dead-lettered — compare the DLQ bin IDs against
 The data simulator has pytest coverage for its models, simulation behavior,
 fault injection, configuration, migration chain, database mapping, lifecycle,
 and Kafka client. The stream processor covers the payload contract, the
-validation and dead-letter rules, all ten detection rules, the batch rollups,
+validation and dead-letter rules, all twelve detection rules, the batch rollups,
 and the streaming behaviour that batch tests cannot reach — deduplication and
 the stateful operator running under a real Spark session.
 

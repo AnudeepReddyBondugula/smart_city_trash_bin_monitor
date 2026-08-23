@@ -30,6 +30,12 @@ this pipeline cannot.
 | Rows duplicated in an output table | A conflict key is missing or wrong in `sql/schema.sql`. Retried micro-batches rely on it. |
 | Query fails on restart after a code change | `STATE_SCHEMA` changed. Spark cannot restore state written under a different schema — delete the `bin_state` checkpoint. |
 | `SparkUI could not bind on port ...` | Ports are now bound explicitly with no retry, so this means something else already holds it. Check for a second stream-processor container. |
+| Bins that stopped early never appear at all | A fresh checkpoint reads from `earliest` for exactly this reason — a `SILENT` bin publishes a handful of readings and stops, and `latest` skipped them while Spark was still building its queries. If they are missing anyway, check `STARTING_OFFSETS` has not been set back. |
+| A zero-`capacity` message kills the application | It should be dead-lettered as `capacity_out_of_range`. If it reaches the operator, `fill_pct` arrives null and every fill rule raises on the comparison. Check `range_rules()` still carries the exclusivity flag. |
+| `zone_hourly_profile` / `zone_daily_trend` stay empty | The `rollups` container writes them, not the streaming app. `docker compose ps rollups`, then its logs. |
+| The rollup logs "No history" every run | That check is `Path.exists()` on `PARQUET_PATH` — so the directory really is absent, not a swallowed read error. Confirm `bin_events` is being written and the volume is shared. |
+| `city_kpi` disagrees with the alerts | The views are built from the settings when the schema is applied. A changed threshold needs the stream processor restarted, not just the simulator. |
+| `stream_processor` exits 137 on stop | SIGKILL after the grace period. `main.run()` polls `awaitAnyTermination` on a timeout so the handler can run - an unbounded wait swallows the signal, because Python cannot run a handler while the main thread is inside a py4j call. Also check `stop_grace_period` is still on the service. |
 
 ## Start at the Spark UI
 
@@ -39,7 +45,9 @@ size — none of which appears in the logs, and all of which answers "is this
 query stalled, starved, or just waiting for the watermark" faster than any
 query against PostgreSQL.
 
-The batch job is on <http://localhost:4041> while it runs.
+The batch job is on <http://localhost:4041> while it runs — it lives in the
+`rollups` container and runs every `ROLLUP_INTERVAL_SECONDS` (default 900), so
+that port is only live for the length of each run.
 
 If a query is missing from that tab it never started; check the logs for the
 `Started 4 streaming quer(ies)` line.

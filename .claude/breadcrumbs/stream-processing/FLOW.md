@@ -26,4 +26,4 @@ Separate checkpoint directories mean one query can be reset without disturbing
 the others. The checkpoints are not a cache — see `DEBUG.md`.
 
 The per-bin rules are documented in [`alert-detection`](../alert-detection/FLOW.md).
-The nightly batch job reads the Parquet this flow writes.
+The batch rollup job reads the Parquet this flow writes.

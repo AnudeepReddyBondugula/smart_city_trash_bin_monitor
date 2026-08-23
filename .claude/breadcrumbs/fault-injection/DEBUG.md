@@ -24,7 +24,7 @@ docker compose up -d --force-recreate data_simulator
 |---|---|
 | No faults logged | See above. Rebuild before anything else. |
 | One mode's detector never fires | With a small fleet, `int(len * rate)` may not reach that mode's index. Raise the count or the rate. |
-| `SLA_BREACH` missing | Only `UNCOLLECTED` bins can breach, and only after `SLA_CRITICAL_MINUTES`. Hours on the default profile. |
+| `SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW` missing | Only `UNCOLLECTED` bins can breach, and only after `SLA_CRITICAL_MINUTES`. Hours on the default profile. |
 | `LOW_BATTERY` missing | Battery has not drained to 20% yet. ~2 hours by default. |
 | `FIRE_RISK` missing | A `HOT` bin must also be nearly full. If bins are collected before 80%, check `COLLECTION_THRESHOLD_PCT` is above 80. |
 | Duplicates not being removed | The duplicate must carry the original timestamp. Confirm `_next_payload` is not regenerating the payload. |

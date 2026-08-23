@@ -43,14 +43,25 @@ WATERMARK=2 minutes
 gated by it, not by fill rate. At the 10-minute default the first zone window is
 ~15 minutes away regardless of how fast bins fill.
 
+Note which side each value belongs to. The first four are the simulator's; the
+rest are the stream processor's, and they are the ones the SLA, offline and
+stuck-sensor rules read. Setting only the simulator's half is the easy mistake —
+a bin still takes two hours to breach its SLA no matter how fast it fills.
+`ROLLUP_INTERVAL_SECONDS=120` is worth adding too, or the rollup tables wait
+fifteen minutes.
+
+These same thresholds build `city_kpi` and `zone_leaderboard` when the schema is
+applied, so the processor must be restarted after changing them — not just the
+simulator.
+
 ## Bring it up
 
 ```bash
-docker compose build data_simulator stream_processor
+docker compose build data_simulator stream_processor rollups
 docker compose up -d postgres kafka kafka_init
 docker compose run --rm data_simulator alembic upgrade head
 docker compose run --rm data_simulator python src/seed.py --count 200 --clear
-docker compose up -d data_simulator stream_processor
+docker compose up -d data_simulator stream_processor rollups
 ```
 
 `alembic upgrade head` names each revision it applies. Only the two
@@ -95,14 +106,21 @@ docker exec -it smartbin_postgres psql -U postgres -d smart_city \
   -c "SELECT count(*) FROM zone_metrics_5m;"
 ```
 
-Expect all eleven alert types given enough time. Rough ordering:
+Expect all twelve alert types given enough time. Rough ordering:
 
 | Wait | Appears |
 |---|---|
 | ~30s | `PREDICTED_OVERFLOW`, `SENSOR_FAULT` |
 | 1–3 min | `CRITICAL_FILL`, `OVERFLOW`, `COLLECTED`, `ANOMALY_JUMP`, `SENSOR_STUCK`, `FIRE_RISK` |
-| 3–5 min | `SLA_BREACH`, `LOW_BATTERY` |
+| 3–5 min | `SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW`, `LOW_BATTERY` |
 | watermark | `OFFLINE`, `zone_metrics_5m` |
+| `ROLLUP_INTERVAL_SECONDS` | `zone_hourly_profile`, `zone_daily_trend` |
+
+`SENSOR_STUCK`, `FIRE_RISK` and `OFFLINE` have the smallest counts — only a few
+bins carry those faults. `SENSOR_STUCK` comes from `FROZEN` bins, which freeze
+at their seeded level of zero; readings at 100% are deliberately not counted,
+because fill is clamped at capacity and every bin awaiting collection repeats
+the same value.
 
 `total_bins` in `city_kpi` should equal the seeded count. If it is short, some
 bins are being dead-lettered — see `stream-processing/DEBUG.md`.
@@ -122,8 +140,9 @@ docker exec smartbin_kafka kafka-console-consumer \
 # Parquet history, date-partitioned
 docker exec stream_processor ls /data/bin_events
 
-# Nightly rollups
-docker compose exec stream_processor python src/batch/rollups.py
+# Rollups. The `rollups` container already runs this every
+# ROLLUP_INTERVAL_SECONDS; this forces one now rather than waiting.
+docker compose run --rm rollups python src/batch/rollups.py
 docker exec -it smartbin_postgres psql -U postgres -d smart_city \
   -c "SELECT * FROM zone_hourly_profile ORDER BY avg_fill_rate_pct_hour DESC NULLS LAST LIMIT 5;" \
   -c "SELECT * FROM zone_daily_trend;"

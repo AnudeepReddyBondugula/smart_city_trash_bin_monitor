@@ -16,7 +16,7 @@ line numbers can move.
 | PR governance and tests | [`ci-pr-governance/`](ci-pr-governance/FLOW.md) | Detect branch type, enforce feature scope, and run pytest. |
 | Fault injection | [`fault-injection/`](fault-injection/FLOW.md) | Make bins misbehave on purpose so every detector has something to detect. |
 | Stream processing | [`stream-processing/`](stream-processing/FLOW.md) | Kafka to Spark: clean, deduplicate, dead-letter, aggregate, and write. |
-| Alert detection | [`alert-detection/`](alert-detection/FLOW.md) | The per-bin stateful operator and its eleven alert types. |
+| Alert detection | [`alert-detection/`](alert-detection/FLOW.md) | The per-bin stateful operator and its twelve alert types. |
 
 ## Symptom routing
 

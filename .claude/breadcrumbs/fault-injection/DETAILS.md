@@ -52,7 +52,7 @@ impossible fill level leaves nothing usable and is dead-lettered whole.
 
 ## Pacing interacts with faults
 
-`SLA_BREACH` needs a bin uncollected past `SLA_CRITICAL_MINUTES`, so on the
+`SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW` needs a bin uncollected past `SLA_CRITICAL_MINUTES`, so on the
 default profile it is hours away. `LOW_BATTERY` needs the battery to drain to
 20%. The demo profile in `.env.local.example` compresses both. See
 `src/config.py` for what each knob does and why the default is what it is.

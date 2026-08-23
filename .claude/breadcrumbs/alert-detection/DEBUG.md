@@ -7,8 +7,12 @@
 | One alert type never fires | Its condition may not be reachable. Check the matching fault mode is being injected — see [`fault-injection`](../fault-injection/DEBUG.md). |
 | `FIRE_RISK` never fires | Needs hot **and** nearly full together. A bin pinned hot while empty satisfies one half forever and the other never. |
 | `OFFLINE` never fires | Watermark, not the rule — see [`stream-processing/DEBUG.md`](../stream-processing/DEBUG.md). Also: a bin that never published at all has no state and no timer. |
-| `SLA_BREACH` never fires | Every healthy bin is collected well inside the allowance. Only an `UNCOLLECTED` bin breaches. |
+| `SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW` never fires | Every healthy bin is collected well inside the allowance. Only an `UNCOLLECTED` bin breaches. |
 | An alert fires on every reading | Its fire-once flag is not being set, or is cleared each time by the reading itself. |
+| `CRITICAL_FILL` or `OVERFLOW` fires repeatedly for one bin | Their flags clear on a **collection only**. If they are re-firing, something else is clearing them - a dip back under the threshold must not. |
+| `SENSOR_STUCK` never fires | Readings at 100% are not counted, by design. A `FROZEN` bin frozen at empty **is** counted - if those are silent too, check `saturated` in `evaluate_reading` has not grown a lower bound. |
+| `SENSOR_STUCK` fires for healthy full bins | The 100% exclusion is gone. Fill is clamped at capacity, so every bin awaiting collection repeats the same reading. |
+| A second broken sensor raises no alert | `reported_faults` compares fault *names*. A boolean there hides every failure after the first. |
 | The same alert repeats after a restart | The checkpoint was deleted, so every bin looks new. |
 | `COLLECTED` where no collection happened | Events processed out of order. `track_bin` sorts by `event_time`; check that sort survived an edit. |
 | Alerts duplicated in `bin_alerts` | The `(bin_id, alert_type, fired_at)` conflict key is missing. Retried micro-batches rely on it. |
@@ -22,9 +26,16 @@ docker exec smartbin_postgres psql -U postgres -d smart_city -c \
      FROM bin_alerts GROUP BY 1,2 ORDER BY 3 DESC;"
 ```
 
-With fault injection on, all eleven types should appear given enough time.
-`FIRE_RISK` and `OFFLINE` will have the smallest counts — only a few bins carry
-those faults.
+With fault injection on, all twelve types should appear given enough time.
+`FIRE_RISK`, `OFFLINE` and `SENSOR_STUCK` will have the smallest counts — only a
+few bins carry those faults.
+
+On the default profile the SLA clocks are two hours and thirty minutes, so
+`SLA_BREACH_*` and `LOW_BATTERY` need the demo profile in `.env.local.example`
+to appear inside a session. Both halves of that profile matter: the simulator's
+pacing **and** the processor's clocks. Speeding up only the simulator is the
+easy mistake — the SLA allowance is the processor's, so a bin still takes two
+hours to breach no matter how fast it fills.
 
 ## Inspecting one bin
 

@@ -3,7 +3,7 @@ name: spark
 description: >
   Load for the stream-processor service, PySpark Structured Streaming,
   the cleaning and dead-letter path, windowed zone aggregates, the stateful
-  per-bin operator, checkpoints, or the nightly batch rollups.
+  per-bin operator, checkpoints, or the batch rollups.
 ---
 
 # Stream Processor
@@ -12,7 +12,8 @@ description: >
 Structured Streaming and writes alerts, per-bin state and zone aggregates to
 PostgreSQL, plus a Parquet event history.
 
-One application, four queries, one separate batch entry point.
+One application, four queries, plus a batch entry point that runs in its own
+`rollups` container on a timer.
 
 | Module | Role |
 |---|---|
@@ -20,8 +21,8 @@ One application, four queries, one separate batch entry point.
 | `src/session.py` | SparkSession and the Kafka source |
 | `src/pipeline/clean.py` | Query 1 — parse, validate, repair, deduplicate |
 | `src/pipeline/zone_metrics.py` | Query 3 — 5-minute windows per zone |
-| `src/pipeline/bin_state.py` | Query 2 — the stateful operator, eleven alert types |
-| `src/batch/rollups.py` | Nightly job over the Parquet history |
+| `src/pipeline/bin_state.py` | Query 2 — the stateful operator, twelve alert types |
+| `src/batch/rollups.py` | Scheduled batch job over the Parquet history |
 | `src/sinks.py` | psycopg2 writes with conflict keys |
 | `sql/schema.sql` | Output tables and the dashboard views |
 
@@ -53,7 +54,22 @@ One application, four queries, one separate batch entry point.
   figure and never arming an offline timeout.
 - **Bounds come from the contract**, never restated in code. Too narrow a range
   would reject the readings a rule exists to catch — a bin above 70 °C is
-  exactly what fire risk looks for.
+  exactly what fire risk looks for. Exclusivity is carried through, not
+  flattened: `capacity` is `exclusiveMinimum: 0`, and a zero admitted there
+  divides to a null `fill_pct` that every fill rule then compares against a
+  threshold — which raises in the worker and stops the application.
+- **Fire-once flags clear on a collection and nothing else.** Clearing them
+  whenever the level falls back under the threshold lets a bin oscillating
+  around 80% re-alert on every crossing and restart its SLA clock each time.
+- **Alert types are the database key.** `bin_alerts` is keyed on
+  `(bin_id, alert_type, fired_at)`, so two conditions that can come due on the
+  same reading need distinct types — which is why the SLA breach is
+  `SLA_BREACH_CRITICAL` and `SLA_BREACH_OVERFLOW` rather than one type with a
+  label in `detail`.
+- **The dashboard views are built from the same settings as the rules.**
+  `sinks.schema_sql()` fills the thresholds into `sql/schema.sql`, so
+  `city_kpi` cannot disagree with the alerts — and `sql/schema.sql` cannot be
+  run through `psql` directly, because it carries placeholders.
 
 ## The Spark UI
 
@@ -63,7 +79,7 @@ duration, watermark position and state store size per query, none of which the
 logs report. Open it before guessing why a query looks stalled.
 
 The batch job binds <http://localhost:4041> instead, because it runs alongside
-the streaming application. Both are set explicitly with
+the streaming application — only for the length of each run. Both are set explicitly with
 `spark.ui.portMaxRetries=0`, so a bind failure is loud rather than a silent move
 to another port.
 
@@ -78,6 +94,19 @@ cd services/stream-processor
 .venv/bin/python -m pytest -q
 .venv/bin/python -m pytest tests/test_bin_state.py -k fire -v
 ```
+
+## Shutdown
+
+`main.run()` waits on `awaitAnyTermination` **with a timeout** and loops. That is
+not a style choice: Python runs a signal handler between bytecodes, so while the
+main thread is inside an unbounded py4j call SIGTERM is never noticed and Docker
+kills the container. The queries are then stopped by name so each finishes its
+micro-batch and commits offsets, and the service carries `stop_grace_period: 60s`
+because ten seconds is not enough for four of them.
+
+A killed container loses nothing — checkpoints and idempotent writes cover it —
+but it reports as exit 137, which is the wrong thing to leave in
+`docker compose ps` for an ordinary stop.
 
 ## Checkpoints
 
