@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # without disturbing the others.
     CHECKPOINT_ROOT: str = "/data/checkpoints"
 
-    # The clean, deduplicated event history. Read by the nightly batch job, and
+    # The clean, deduplicated event history. Read by the batch rollup job, and
     # the only place a question nobody has asked yet can still be answered from.
     PARQUET_PATH: str = "/data/bin_events"
 
@@ -52,7 +52,14 @@ class Settings(BaseSettings):
     # window over which duplicates are detected.
     WATERMARK: str = "10 minutes"
 
-    STARTING_OFFSETS: str = "latest"
+    # Only consulted when a checkpoint does not exist yet, and on that first
+    # start "latest" loses data: the simulator is already publishing while
+    # Spark spends tens of seconds building four queries. That window is fatal
+    # for a bin that falls silent by design - it publishes its handful of
+    # readings, stops forever, and if they landed in the gap it never enters
+    # the state store at all, so no offline timeout is ever armed for it.
+    # MAX_OFFSETS_PER_TRIGGER keeps the resulting backlog from arriving at once.
+    STARTING_OFFSETS: str = "earliest"
 
     # Local mode: one machine, no master and no workers. A thousand events a
     # second does not need a cluster, and skipping it removes three containers
@@ -66,7 +73,7 @@ class Settings(BaseSettings):
     # inside the container where nothing can reach it.
     SPARK_UI_PORT: int = 4040
 
-    # The nightly batch job gets its own port. It runs alongside the streaming
+    # The batch rollup job gets its own port. It runs alongside the streaming
     # application, and without a separate port it silently lands on whatever
     # Spark finds free after retrying - so the address changes run to run and
     # the log carries a warning that reads like a fault.
