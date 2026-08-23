@@ -39,6 +39,42 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # Creates the topics explicitly instead of letting the broker auto-create
+  # them. An auto-created topic gets the broker default of a single partition,
+  # which pins the entire stream to one consumer task no matter how many cores
+  # are available. The producer already keys every message by bin_id, so
+  # splitting across partitions keeps each bin's events in order on one
+  # partition - which the stateful processing downstream depends on.
+  kafka_init:
+    image: confluentinc/cp-kafka:7.4.1
+    container_name: smartbin_kafka_init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # Note --if-not-exists leaves an existing topic alone, partition count
+    # included. A topic auto-created earlier with one partition therefore stays
+    # at one: adding partitions later would change which partition a bin's key
+    # hashes to, breaking the per-bin ordering the stateful query depends on.
+    # Delete the topic and let this recreate it. The describe at the end prints
+    # what the topics actually are, so a stale one is visible rather than
+    # assumed.
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic smartbin-telemetry-v1 --partitions 12 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic smartbin-telemetry-dlq --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:29092 --describe --topic smartbin-telemetry-v1 | head -1
+        kafka-topics --bootstrap-server kafka:29092 --describe --topic smartbin-telemetry-dlq | head -1
+    restart: "no"
 
   data_simulator:
     build:
@@ -50,6 +86,90 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+
+  stream_processor:
+    build:
+      # Built from the repository root so the shared telemetry contract is
+      # inside the build context. Both services build their view of the payload
+      # from that one file.
+      context: .
+      dockerfile: services/stream-processor/Dockerfile
+      target: runtime
+    container_name: stream_processor
+    # Deliberately the same environment file as the simulator: one source for
+    # the database credentials, the broker address and the topic name means the
+    # producer and the consumer cannot end up pointed at different topics.
+    env_file:
+      - ./services/data-simulator/.env.docker
+    ports:
+      # The Spark UI. This is the only place the streaming queries report input
+      # rate, batch duration, watermark position and state store size per query
+      # - the Structured Streaming tab is the first thing to open when a query
+      # looks stalled. Unpublished it runs, but nothing outside the container
+      # can reach it.
+      #
+      # 4040 is the streaming application; 4041 is the nightly batch job, which
+      # runs alongside it and needs a port of its own.
+      - "4040:4040"
+      - "4041:4041"
+    # Four streaming queries need longer than the ten second default to finish
+    # the micro-batch they are in and commit their offsets. Too short and every
+    # ordinary stop is a SIGKILL reported as exit 137.
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+    volumes:
+      # Checkpoints and the Parquet history. This is not a cache - the
+      # checkpoints hold every SLA clock and last-seen timestamp in the fleet,
+      # so removing this volume erases the pipeline's memory, not its scratch
+      # space.
+      - spark_state:/data
+
+  # The rollup job on a timer. It is a separate container rather than a thread
+  # inside the streaming application because a batch job that shares a process
+  # with four streaming queries competes with them for the same executors, and
+  # a failure in it would take them down with it.
+  #
+  # The default interval is fifteen minutes rather than a day. The job is a
+  # handful of aggregates over a small history and its writes are upserts, so
+  # running it often costs almost nothing - and a day's wait would mean the
+  # hourly and daily tables sat empty through every demo and every review.
+  #
+  # ponytail: a sleep loop, not a scheduler. It cannot express "03:00 daily",
+  # it drifts by the job's own duration, and it forgets missed runs on restart.
+  # A real deployment points its own scheduler at the same command - the job is
+  # idempotent, so running it more or less often changes nothing but freshness.
+  rollups:
+    build:
+      context: .
+      dockerfile: services/stream-processor/Dockerfile
+      target: runtime
+    container_name: rollups
+    env_file:
+      - ./services/data-simulator/.env.docker
+    # No `|| true`. A rollup that fails should stop the container so the
+    # failure is visible in `docker compose ps` and the restart policy retries
+    # it, rather than being swallowed by the loop and leaving stale tables
+    # behind with nothing to show for it.
+    command: >
+      sh -c 'while true; do
+        python src/batch/rollups.py;
+        sleep "$${ROLLUP_INTERVAL_SECONDS:-900}";
+      done'
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # The same Parquet history the streaming pipeline writes. Read only as
+      # far as this job is concerned, but the volume is shared, not copied.
+      - spark_state:/data
 
 volumes:
   postgres_data:
+  spark_state:

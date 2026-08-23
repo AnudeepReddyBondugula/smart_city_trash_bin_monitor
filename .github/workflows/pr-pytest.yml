@@ -10,8 +10,25 @@ permissions:
 
 jobs:
   pytest:
-    name: Run Pytests
+    name: Run Pytests (${{ matrix.service }})
     runs-on: ubuntu-latest
+
+    # One job per service. This was hardcoded to data-simulator, which meant a
+    # new service could be added with a full test suite and CI would never run
+    # a single one of its tests. Add new services here.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: data-simulator
+            python-version: "3.12"
+            needs-java: false
+          # PySpark 3.5 supports Python up to 3.11. On 3.12 its pandas operators
+          # fail at run time importing distutils, removed in that version - so
+          # this is pinned rather than kept in step with the other service.
+          - service: stream-processor
+            python-version: "3.11"
+            needs-java: true
 
     services:
       postgres:
@@ -30,20 +47,29 @@ jobs:
 
     defaults:
       run:
-        working-directory: services/data-simulator
+        working-directory: services/${{ matrix.service }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      # Spark runs on the JVM even when driven from Python, and local mode
+      # still starts one in-process.
+      - name: Set up Java 17
+        if: matrix.needs-java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
           cache-dependency-path: |
-            services/data-simulator/requirements.txt
-            services/data-simulator/requirements-dev.txt
+            services/${{ matrix.service }}/requirements.txt
+            services/${{ matrix.service }}/requirements-dev.txt
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip

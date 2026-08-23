@@ -1,0 +1,13 @@
+-r requirements.txt
+
+pytest
+pytest-asyncio
+pytest-cov
+ruff
+mypy
+
+# PySpark 3.5 supports Python up to 3.11, which is what the image and CI run.
+# On a machine that only has 3.12 the pandas UDF path fails importing distutils,
+# removed in that version; setuptools restores it so the suite can still be run
+# locally. Not a substitute for the supported version - it only covers this.
+setuptools

@@ -17,7 +17,8 @@ the right entry point before loading the detailed skill.
 |---|---|---|
 | [simulation-engine](simulation-engine/SKILL.md) | Working on `Bin`, `BinSimulator`, `SimulationManager`, the tick loop, or telemetry generation | Subsystem context for the simulation core |
 | [database](database/SKILL.md) | Working on the SQLAlchemy async engine, `SmartBin`/`smart_bins`, schema creation, or seeding | Subsystem context for persistence |
-| [kafka](kafka/SKILL.md) | Working on the `KafkaClient` producer, message format/keys, retries, or broker config | Subsystem context for telemetry publishing |
+| [kafka](kafka/SKILL.md) | Working on the `KafkaClient` producer, message format/keys, retries, topics, or broker config | Subsystem context for telemetry publishing |
+| [spark](spark/SKILL.md) | Working on the stream-processor: Structured Streaming, cleaning and dead letters, windowed aggregates, the stateful operator, checkpoints, or the batch rollups | Subsystem context for stream processing |
 | [config](config/SKILL.md) | Working on `Settings`/`get_settings()`, env vars, `DATABASE_URL`, or `.env` files | Subsystem context for configuration |
 | [testing](testing/SKILL.md) | Writing/running/debugging pytest tests, fixtures, mocks, or docstring hooks | Subsystem context for the test suite |
 | [ci-cd](ci-cd/SKILL.md) | Working on GitHub Actions, branch naming, or PR governance/scope rules | Subsystem context for CI/CD |

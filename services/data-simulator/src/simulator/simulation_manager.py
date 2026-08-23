@@ -1,12 +1,23 @@
 from models.bin import Bin
-from simulator.bin_simulator import BinSimulator
+from simulator.bin_simulator import BinSimulator, assign_fault_modes
 
-from database import AsyncSessionLocal, SmartBin
-from sqlalchemy import select
+from database import AsyncSessionLocal, SmartBin, engine
+from sqlalchemy import inspect, select
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class SchemaNotReadyError(RuntimeError):
+    """The database has not been migrated yet.
+
+    Raised instead of letting the driver's own error escape. A missing table
+    surfaces from asyncpg as a thirty-line traceback with the one useful line
+    at the bottom, which tells an operator nothing about what to do next -
+    and migrations are deliberately a manual step here, so this is an ordinary
+    thing to get wrong rather than an exceptional one.
+    """
 
 
 class SimulationManager:
@@ -31,10 +42,44 @@ class SimulationManager:
 
         self._simulators: dict[str, BinSimulator] = {}
 
+    async def require_schema(self) -> None:
+        """
+        Check the bins table exists before anything tries to read it.
+
+        Migrations are a deliberate manual step, so starting against an
+        unmigrated database is a routine mistake rather than an exceptional
+        one, and deserves an answer rather than a stack trace.
+
+        Raises:
+            SchemaNotReadyError:
+                The table is missing, with the command that creates it.
+        """
+        async with engine.connect() as connection:
+            has_table = await connection.run_sync(
+                lambda sync_connection: inspect(sync_connection).has_table(
+                    SmartBin.__tablename__
+                )
+            )
+
+        if not has_table:
+            raise SchemaNotReadyError(
+                f"The '{SmartBin.__tablename__}' table does not exist. "
+                "Migrations are a manual step; run them before starting the "
+                "simulator:\n"
+                "    docker compose run --rm data_simulator alembic upgrade head\n"
+                "    docker compose run --rm data_simulator python src/seed.py --count 200"
+            )
+
     async def initialize(self) -> None:
         """
         Loads all bins from the database and starts their simulators.
+
+        Raises:
+            SchemaNotReadyError:
+                The database has not been migrated.
         """
+        await self.require_schema()
+
         logger.info("Loading bins from database...")
 
         async with AsyncSessionLocal() as session:
@@ -45,20 +90,38 @@ class SimulationManager:
             )
             db_bins = result.scalars().all()
 
-            for db_bin in db_bins:
-
-                bin = Bin(
+            bins = [
+                Bin(
                     bin_id=db_bin.bin_id,
                     latitude=db_bin.latitude,
                     longitude=db_bin.longitude,
                     capacity=db_bin.capacity,
                     zone=db_bin.zone,
                 )
+                for db_bin in db_bins
+            ]
 
+            # Faults are assigned across the whole fleet at once rather than per
+            # bin, so the share of faulty bins and the spread of fault modes are
+            # both known rather than left to chance.
+            assign_fault_modes(bins)
+
+            for bin in bins:
                 simulator = BinSimulator(bin)
                 simulator.start()
 
                 self._simulators[bin.bin_id] = simulator
+
+        if not self._simulators:
+            # Not fatal - bins can be added later - but silence here reads as a
+            # broken simulator when it is really an unseeded database.
+            logger.warning(
+                "No ACTIVE bins found, so nothing will be published. Seed the "
+                "database:\n"
+                "    docker compose run --rm data_simulator python src/seed.py "
+                "--count 200"
+            )
+            return
 
         logger.info(
             "Started %d simulator(s).",

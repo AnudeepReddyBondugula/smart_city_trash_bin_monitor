@@ -1,13 +1,31 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from src.simulator.simulation_manager import SimulationManager
+from src.simulator.simulation_manager import SchemaNotReadyError, SimulationManager
 from src.models.bin import Bin
 from src.database import SmartBin
 from sqlalchemy.sql.expression import Select
 
+# Captured before the autouse fixture below replaces it, so the tests that
+# exercise the check itself call the real implementation rather than the mock
+# standing in for it everywhere else.
+REAL_REQUIRE_SCHEMA = SimulationManager.require_schema
+
 @pytest.fixture
 def sim_manager():
     return SimulationManager()
+
+
+@pytest.fixture(autouse=True)
+def migrated_database():
+    """Assume the schema exists, unless a test says otherwise.
+
+    `initialize()` checks the table is present before reading it, which is real
+    I/O against the engine. These tests mock the session, not the engine.
+    """
+    with patch.object(
+        SimulationManager, "require_schema", new=AsyncMock()
+    ) as check:
+        yield check
 
 @pytest.fixture
 def bin_instance():
@@ -200,3 +218,67 @@ def test_simulators_property(sim_manager):
 
     assert sim_manager.simulators is sim_manager._simulators
     assert sim_manager.simulators["bin_1"] is mock_simulator
+
+
+@pytest.mark.asyncio
+async def test_missing_schema_raises_an_actionable_error(sim_manager, migrated_database):
+    """An unmigrated database is answered, not stack-traced.
+
+    Migrations are a deliberate manual step, so starting against an unmigrated
+    database is a routine mistake. Letting the driver's own error escape gives
+    a thirty-line traceback with the one useful line at the bottom and no hint
+    of what to run.
+    """
+    migrated_database.side_effect = SchemaNotReadyError(
+        "The 'smart_bins' table does not exist. "
+        "Run: alembic upgrade head"
+    )
+
+    with pytest.raises(SchemaNotReadyError) as error:
+        await sim_manager.initialize()
+
+    assert "smart_bins" in str(error.value)
+    assert "alembic upgrade head" in str(error.value)
+
+
+@pytest.mark.asyncio
+@patch("src.simulator.simulation_manager.engine")
+async def test_require_schema_passes_when_the_table_exists(mock_engine, sim_manager):
+    """The happy path does not raise."""
+    connection = AsyncMock()
+    connection.run_sync.return_value = True
+    mock_engine.connect.return_value.__aenter__.return_value = connection
+
+    await REAL_REQUIRE_SCHEMA(sim_manager)
+
+
+@pytest.mark.asyncio
+@patch("src.simulator.simulation_manager.engine")
+async def test_require_schema_names_the_commands_to_run(mock_engine, sim_manager):
+    """The error carries the fix, not just the diagnosis."""
+    connection = AsyncMock()
+    connection.run_sync.return_value = False
+    mock_engine.connect.return_value.__aenter__.return_value = connection
+
+    with pytest.raises(SchemaNotReadyError) as error:
+        await REAL_REQUIRE_SCHEMA(sim_manager)
+
+    message = str(error.value)
+    assert "alembic upgrade head" in message
+    assert "seed.py" in message
+
+
+@pytest.mark.asyncio
+@patch("src.simulator.simulation_manager.AsyncSessionLocal")
+async def test_an_unseeded_database_says_so(mock_session_maker, sim_manager, caplog):
+    """Zero bins is not fatal, but silence reads as a broken simulator."""
+    mock_session = AsyncMock()
+    mock_session_maker.return_value.__aenter__.return_value = mock_session
+    mock_result = MagicMock()
+    mock_result.scalars().all.return_value = []
+    mock_session.execute.return_value = mock_result
+
+    await sim_manager.initialize()
+
+    assert "No ACTIVE bins found" in caplog.text
+    assert "seed.py" in caplog.text

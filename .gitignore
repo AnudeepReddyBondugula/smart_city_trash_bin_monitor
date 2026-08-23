@@ -28,3 +28,6 @@ event.json
 
 # generated reports
 writeup/
+
+# Stream processor local state
+services/stream-processor/logs/

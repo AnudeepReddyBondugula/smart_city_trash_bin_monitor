@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smart-city-trash-bin-monitor/contracts/telemetry-v1.json",
+  "title": "Smart bin telemetry, version 1",
+  "description": "The message body published to the Kafka topic smartbin-telemetry-v1. The producer is services/data-simulator (Bin.to_payload). The consumer is services/stream-processor, which builds its Spark StructType from this file. Adding an optional field is backward compatible; renaming or removing one is not, and becomes smartbin-telemetry-v2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bin_id",
+    "capacity",
+    "current_fill_level",
+    "battery_level",
+    "temperature",
+    "latitude",
+    "longitude",
+    "zone",
+    "timestamp"
+  ],
+  "properties": {
+    "bin_id": {
+      "type": "string",
+      "description": "Unique bin identifier. Also the Kafka message key, so all events for one bin land on one partition and keep their order.",
+      "minLength": 1
+    },
+    "capacity": {
+      "type": "number",
+      "description": "Maximum capacity of the bin, in litres. Bins are not all the same size, so consumers must divide by this rather than treating current_fill_level as a percentage.",
+      "exclusiveMinimum": 0
+    },
+    "current_fill_level": {
+      "type": "number",
+      "description": "Absolute amount of waste in the bin, in the same unit as capacity. NOT a percentage: fill_pct = current_fill_level / capacity * 100.",
+      "minimum": 0
+    },
+    "battery_level": {
+      "type": "number",
+      "description": "Remaining battery, already a percentage.",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "temperature": {
+      "type": "number",
+      "description": "Bin temperature in degrees Celsius. The range here is what a sensor could physically report; a reading outside it is rejected to the dead-letter topic. Values well above ambient are legitimate and are what fire-risk detection looks for.",
+      "minimum": -40,
+      "maximum": 120
+    },
+    "latitude": {
+      "type": "number",
+      "minimum": -90,
+      "maximum": 90
+    },
+    "longitude": {
+      "type": "number",
+      "minimum": -180,
+      "maximum": 180
+    },
+    "zone": {
+      "type": "string",
+      "description": "City zone the bin belongs to. Denormalised onto every event on purpose, so consumers never have to join back to the smart_bins table to group by zone.",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event time, ISO 8601 with an explicit UTC offset. This is the event-time column every windowed and stateful consumer keys on, and half of the deduplication key (bin_id, timestamp) - so a re-sent duplicate must carry the original timestamp unchanged."
+    }
+  }
+}

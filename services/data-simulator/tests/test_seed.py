@@ -1,7 +1,13 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.seed import HYDERABAD_CENTER, ZONE_OFFSETS, seed_db
+from src.seed import (
+    BIN_CAPACITIES,
+    HYDERABAD_CENTER,
+    MAX_BINS_PER_RUN,
+    ZONE_OFFSETS,
+    seed_db,
+)
 
 # NOTE: import SmartBin the same way seed.py does (`from database import ...`).
 # Because `src/` has no __init__.py, `database.SmartBin` and `src.database.SmartBin`
@@ -94,16 +100,43 @@ async def test_seed_clear_true_deletes_first(
 
 @pytest.mark.asyncio
 @patch("src.seed.create_async_engine")
-async def test_seed_over_500_is_rejected(mock_create_engine, capsys):
+async def test_seed_over_the_cap_is_rejected(mock_create_engine, capsys):
     """
-    Test the safety guard: requesting more than 500 bins is rejected early,
-    prints an error, and never creates a database engine nor session.
+    Test the safety guard: requesting more bins than the cap allows is rejected
+    early, prints an error, and never creates a database engine nor session.
     """
-    await seed_db(count=501, clear=False)
+    await seed_db(count=MAX_BINS_PER_RUN + 1, clear=False)
 
     captured = capsys.readouterr()
-    assert "cannot seed more than 500" in captured.out.lower()
+    assert f"cannot seed more than {MAX_BINS_PER_RUN}" in captured.out.lower()
     mock_create_engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("src.seed.async_sessionmaker")
+@patch("src.seed.create_async_engine")
+async def test_seed_uses_a_range_of_capacities(
+    mock_create_engine, mock_async_sessionmaker
+):
+    """
+    Test that seeded bins are not all the same size.
+    A single capacity would make the raw fill level and the fill percentage
+    numerically identical, hiding every percentage threshold downstream.
+    """
+    mock_engine = MagicMock()
+    mock_engine.dispose = AsyncMock()
+    mock_create_engine.return_value = mock_engine
+
+    mock_session = _build_session_mock()
+    _wire_session_factory(mock_async_sessionmaker, mock_session)
+
+    await seed_db(count=200, clear=False)
+
+    capacities = {
+        call_args.args[0].capacity for call_args in mock_session.add.call_args_list
+    }
+    assert capacities <= set(BIN_CAPACITIES)
+    assert len(capacities) > 1
 
 
 @pytest.mark.asyncio

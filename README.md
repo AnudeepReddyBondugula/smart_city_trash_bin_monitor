@@ -1,14 +1,33 @@
 # Smart City Trash Bin Monitor - BinForge 🏙️
 
-Data Simulator is the data generation service for the Smart City Trash Bin
-Monitor. It runs one asynchronous simulation per active bin and publishes fill,
-battery, temperature, location, zone, and timestamp telemetry to Apache Kafka.
+Two services. The **Data Simulator** runs one asynchronous simulation per active
+bin and publishes fill, battery, temperature, location, zone and timestamp
+telemetry to Apache Kafka. The **Stream Processor** reads that topic with Spark
+Structured Streaming and turns it into alerts, per-bin state and zone
+aggregates in PostgreSQL, plus a Parquet event history.
 
 ## Architecture
 
 - **Simulator**: Python 3.12 (AsyncIO)
+- **Stream Processor**: Python 3.11, PySpark 3.5 (see note below)
 - **Database**: PostgreSQL 15
 - **Message Broker**: Apache Kafka (KRaft mode)
+
+```
+data-simulator ──▶ smartbin-telemetry-v1 ──▶ stream-processor ──▶ PostgreSQL
+                                                    │                Parquet
+                                                    └──▶ smartbin-telemetry-dlq
+```
+
+Both services read the same payload contract, `contracts/telemetry-v1.json`.
+The producer asserts its payload against it and the consumer builds its Spark
+schema from it, so a renamed field fails a test instead of silently reading as
+nulls on the consumer side.
+
+> **Python 3.11 for the stream processor.** PySpark 3.5 supports Python up to
+> 3.11. On 3.12 its pandas operators fail at run time importing `distutils`,
+> which that version removed. The image and CI pin 3.11; the simulator stays on
+> 3.12.
 
 ## Quick Start (Docker)
 
@@ -26,12 +45,28 @@ _(Note: If you plan to run the Python script natively instead of via Docker, cre
 
 ### 2. Start Infrastructure
 
-Start PostgreSQL and Kafka, then build the simulator image:
+Start PostgreSQL and Kafka, create the topics, then build the images:
 
 ```bash
-docker compose up -d postgres kafka
-docker compose build data_simulator
+docker compose up -d postgres kafka kafka_init
+docker compose build data_simulator stream_processor
 ```
+
+`kafka_init` creates `smartbin-telemetry-v1` with 12 partitions and
+`smartbin-telemetry-dlq` with 3, and prints what it created. Twelve partitions
+is what lets Spark spread the load; auto-creation would give one, pinning the
+whole stream to a single task.
+
+> If the topic already exists with the wrong partition count, `kafka_init`
+> leaves it alone — adding partitions later would change which partition a
+> bin's key hashes to and break the per-bin ordering the stateful query relies
+> on. Delete it and let `kafka_init` recreate it:
+>
+> ```bash
+> docker exec smartbin_kafka kafka-topics --bootstrap-server localhost:9092 \
+>   --delete --topic smartbin-telemetry-v1
+> docker compose up kafka_init
+> ```
 
 _(The simulator will not emit telemetry until the database is migrated and seeded.)_
 
@@ -43,6 +78,15 @@ Apply all versioned migrations and seed mock data using one-off containers:
 docker compose run --rm data_simulator alembic upgrade head
 docker compose run --rm data_simulator python src/seed.py --count 50
 ```
+
+The upgrade names every revision it applies:
+
+```text
+INFO  [alembic.runtime.migration] Running upgrade  -> 9b7a1e20a036, Create the initial smart_bins schema.
+INFO  [alembic.runtime.migration] Running upgrade 9b7a1e20a036 -> 0002_add_zone, Add zone to smart_bins and backfill existing rows.
+```
+
+Only the two `Context impl` lines means the database was already at head.
 
 List migration history and mark the database's current revision:
 
@@ -71,13 +115,144 @@ To roll back only the zone migration on a disposable database:
 docker compose run --rm data_simulator alembic downgrade 9b7a1e20a036
 ```
 
-### 4. Recreate Simulator
-
-Recreate the simulator to pick up the rebuilt image and seeded data:
+### 4. Start the Services
 
 ```bash
-docker compose up -d --force-recreate data_simulator
+docker compose up -d --force-recreate data_simulator stream_processor rollups
 ```
+
+The stream processor applies `services/stream-processor/sql/schema.sql` on
+startup — it is idempotent, so restarting never destroys accumulated history —
+and then starts four streaming queries: `bin_events`, `dead_letters`,
+`zone_metrics` and `bin_state`.
+
+### The Spark UI
+
+**<http://localhost:4040>** — and its **Structured Streaming** tab is the first
+place to look when a query seems stalled. It reports per query: input rate,
+processing rate, batch duration, watermark position and state store size. None
+of that appears in the logs.
+
+The rollup job runs in its own container alongside the streaming application
+and gets its own port, **<http://localhost:4041>**, for as long as each run
+lasts. Both are bound
+explicitly (`SPARK_UI_PORT`, `SPARK_BATCH_UI_PORT`) rather than left to Spark's
+retry, so the address never moves.
+
+---
+
+## The Processing Layer
+
+One Spark application with four streaming queries, plus a batch job on a timer.
+
+| Query | Writes | Answers |
+|---|---|---|
+| `bin_events` | Parquet, partitioned by date | The history the batch job reads |
+| `dead_letters` | `smartbin-telemetry-dlq` | Messages that could not be parsed or believed |
+| `zone_metrics` | `zone_metrics_5m` | Per-zone rollups, at every grain, by SQL |
+| `bin_state` | `bin_alerts`, `bin_state_latest` | Twelve alert types from one per-bin state read |
+| `batch/rollups.py` | `zone_hourly_profile`, `zone_daily_trend` | Peak hours and long-range trends |
+
+Dashboard figures are the `city_kpi` and `zone_leaderboard` views over those
+tables — no Spark job of their own.
+
+Alert types: `CRITICAL_FILL`, `OVERFLOW`, `PREDICTED_OVERFLOW`, `FIRE_RISK`,
+`LOW_BATTERY`, `OFFLINE`, `COLLECTED`, `ANOMALY_JUMP`, `SENSOR_STUCK`,
+`SENSOR_FAULT`, `SLA_BREACH_CRITICAL`, `SLA_BREACH_OVERFLOW`.
+
+The two SLA breaches are separate types rather than one with a label. Both
+clocks can come due on the same reading, and `bin_alerts` is keyed on
+`(bin_id, alert_type, fired_at)` — under a shared type the second row collided
+with the first and was dropped on insert.
+
+The thresholds these rules use are also what builds `city_kpi` and
+`zone_leaderboard`, filled in when the schema is applied. Changing a threshold
+therefore needs the stream processor restarted, and the dashboard cannot drift
+away from the alerts.
+
+### One bad sensor does not lose the bin
+
+Validation is field-level, not message-level. A field the pipeline needs — bin,
+zone, capacity, fill level, timestamp — is fatal and the message is
+dead-lettered whole. A sensor that can fail on its own — temperature, battery,
+coordinates — is **nulled and the reading kept**, and the bin raises
+`SENSOR_FAULT` naming what failed.
+
+That distinction matters more than it looks. Rejecting the whole message for an
+impossible temperature meant the bin never reached the state store, so it
+vanished from every dashboard figure *and* never armed an offline timeout — a
+bin publishing every five seconds became completely invisible, with the DLQ as
+its only trace. The loudest possible sensor failure produced the quietest
+possible outcome.
+
+Nulled rather than clamped, because clamping 150 °C to 120 °C invents a
+plausible number no sensor reported and then averages it into the zone
+temperature as though it were real.
+
+`city_kpi.faulty_sensor_bins` counts these. They stay in every other figure too,
+which is the point. A second sensor failing later raises its own alert — the
+pipeline remembers *which* sensors it has reported, not merely that it reported
+one.
+
+A message whose `capacity` is zero is fatal, not repairable. It divides to a
+null fill percentage, and every fill rule compares that number against a
+threshold — which raises in the Spark worker and stops the application. The
+contract declares `exclusiveMinimum: 0` and validation enforces the
+exclusivity.
+
+### Fault injection
+
+A share of bins (`FAULT_INJECTION_RATE`, default 12%) misbehave on purpose, so
+every detector has something to detect. Without them the offline, stuck-sensor,
+duplicate, sensor-fault, fire-risk and SLA rules can be written but never
+observed working.
+
+| Mode | Behaviour | Proves |
+|---|---|---|
+| `SILENT` | reports for a while, then stops | `OFFLINE` |
+| `FROZEN` | repeats one reading forever | `SENSOR_STUCK` |
+| `SPIKE` | alternates an impossible temperature and an impossible fill level | `SENSOR_FAULT` and dead-lettering |
+| `DUPLICATE` | re-sends the previous event verbatim | deduplication |
+| `HOT` | runs hot in proportion to how full it is | `FIRE_RISK` |
+| `JUMP` | one large but legal fill jump | `ANOMALY_JUMP` |
+| `UNCOLLECTED` | the truck never comes | `SLA_BREACH_CRITICAL` / `SLA_BREACH_OVERFLOW` |
+
+Modes are assigned by cycling rather than drawing per bin, so a small fleet
+cannot end up with no hot bin and therefore no fire alert anywhere in the run.
+
+### Pacing, and the demo profile
+
+The defaults are paced for a real bin: about an hour and a quarter to a critical
+level, two hours to a battery alert. That is deliberate — the SLA rules allow
+two hours to collect a critical bin, and at a faster rate a bin overflows dozens
+of times before one SLA clock expires.
+
+To see everything in minutes instead, uncomment the demo profile in
+`.env.local.example` and copy those values into `.env.docker`. The fire-risk
+temperature ramp scales with fill level, so it needs no adjusting.
+
+Two things stay slow regardless, and both are the watermark rather than the
+pacing: `zone_metrics_5m` rows only appear once the watermark passes the end of
+a window, and `OFFLINE` only fires once it passes a bin's timeout. With the
+default `WATERMARK` of 10 minutes, expect roughly 15 minutes before the first
+window lands. Lower `WATERMARK` for a faster demo.
+
+---
+
+## Order matters
+
+The four steps above are a sequence, not a menu. Starting the simulator against
+a database that has not been migrated is the single most common mistake, so both
+bad states say what to do rather than failing obscurely:
+
+| State | What you get |
+|---|---|
+| Not migrated | `The 'smart_bins' table does not exist.` plus the two commands to run. Exits 1, cleanly. |
+| Migrated, not seeded | `No ACTIVE bins found, so nothing will be published.` plus the seed command. Keeps running. |
+| Migrated and seeded | `Injected faults into N of M bin(s).` then `Started M simulator(s).` |
+
+If you see a raw SQLAlchemy traceback instead of the first message, the image is
+stale — `docker compose build data_simulator`.
 
 ---
 
@@ -88,6 +263,17 @@ docker compose up -d --force-recreate data_simulator
 ```bash
 docker logs data_simulator -f
 ```
+
+A healthy simulator is **silent after startup**. Per-tick telemetry is logged at
+DEBUG, so `-f` showing nothing means it is working, not stalled. To watch actual
+activity, consume from Kafka (below) or query `bin_state_latest`. On a native
+process, `kill -USR1 <pid>` toggles debug logging.
+
+The last line on a normal shutdown is `Shutdown complete`, with no warnings and
+exit code 0.
+
+**Spark UI:** <http://localhost:4040> — the Structured Streaming tab shows what
+each query is actually doing.
 
 **Verify Postgres Data:**
 
@@ -107,30 +293,89 @@ docker exec smartbin_kafka kafka-console-consumer \
 Do not add `--from-beginning` when validating the current payload schema; it
 also replays historical records created before newer fields existed.
 
+**Confirm both services came up:**
+
+```bash
+docker logs data_simulator   2>&1 | grep -E "Injected|Started .* simulator"
+docker logs stream_processor 2>&1 | grep -E "Started 4 streaming|UI on port"
+```
+
+**Verify the processing layer:**
+
+```bash
+# What fired, and how much of it
+docker exec -it smartbin_postgres psql -U postgres -d smart_city \
+  -c "SELECT alert_type, severity, count(*) FROM bin_alerts GROUP BY 1,2 ORDER BY 3 DESC;" \
+  -c "SELECT * FROM city_kpi;" \
+  -c "SELECT * FROM zone_leaderboard;" \
+  -c "SELECT * FROM zone_metrics_5m ORDER BY window_start DESC LIMIT 5;"
+
+# Messages Spark refused, with the reason and the original payload
+docker exec smartbin_kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 --topic smartbin-telemetry-dlq \
+  --from-beginning --max-messages 2 --timeout-ms 30000
+
+# The Parquet history, partitioned by date
+docker exec stream_processor ls /data/bin_events
+
+# The rollups. The `rollups` container runs this every
+# ROLLUP_INTERVAL_SECONDS (default 900); this is only to see one immediately.
+docker compose run --rm rollups python src/batch/rollups.py
+```
+
+With fault injection on, all twelve alert types should appear in that first
+query, and `city_kpi.total_bins` should equal the number you seeded. If it is
+short, some bins are being dead-lettered — compare the DLQ bin IDs against
+`bin_state_latest`.
+
+> `/data` on the stream processor is a named volume holding the checkpoints. It
+> is not a cache: it holds every SLA clock, last-seen timestamp and
+> deduplication key in the fleet. `docker compose down -v` erases the
+> pipeline's memory, not its scratch space.
+>
+> Changing `STATE_SCHEMA` in `bin_state.py` makes existing checkpoints
+> unreadable — Spark cannot restore state written under a different schema.
+> Delete `/data/checkpoints/bin_state` after any such change.
+
 ## Testing
 
 The data simulator has pytest coverage for its models, simulation behavior,
-configuration, migration chain, database mapping, lifecycle, and Kafka client.
+fault injection, configuration, migration chain, database mapping, lifecycle,
+and Kafka client. The stream processor covers the payload contract, the
+validation and dead-letter rules, all twelve detection rules, the batch rollups,
+and the streaming behaviour that batch tests cannot reach — deduplication and
+the stateful operator running under a real Spark session.
+
+The detection rules are plain Python over a dictionary, so they run without a
+cluster in under a second. Each is tested both for firing when it should and
+staying quiet when it should not; a rule that fires on everything looks
+identical to a correct one if only the first case is checked.
 
 Run tests locally:
 
 ```bash
-cd services/data-simulator
-pytest -v
+cd services/data-simulator   && pytest -v
+cd services/stream-processor && pytest -v
 ```
 
-Or reproduce the Docker test stage:
+Or reproduce the Docker test stages:
 
 ```bash
 docker build --target test \
   -t smart-city-data-simulator-test services/data-simulator
+docker build --target test -f services/stream-processor/Dockerfile \
+  -t smart-city-stream-processor-test .
 ```
+
+_(The stream processor builds from the repository root so the shared contract is
+in the build context.)_
 
 ## CI/CD Pipeline
 
 GitHub Actions detects supported branch prefixes, enforces file scope for
-`feature/` branches, and runs the data-simulator pytest suite on pull requests
-to `develop`.
+`feature/` branches, and runs one pytest job per service on pull requests to
+`develop`. Each service in the matrix carries its own Python version, since the
+two do not agree on one.
 
 **Feature Policy:**
 When creating a feature branch, you must name it `feature/<service>/<task>` (e.g. `feature/data-simulator/add-tests`).
