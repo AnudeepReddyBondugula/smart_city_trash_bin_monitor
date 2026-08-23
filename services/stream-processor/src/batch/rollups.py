@@ -1,4 +1,4 @@
-"""The nightly job - peak hours and longer-range trends.
+"""The rollup job - peak hours and longer-range trends.
 
 Two of the client's questions ask when waste is generated fastest and how it
 changes across weeks and seasons. Neither is a real-time question, and neither
@@ -7,7 +7,7 @@ something Spark does badly, and there is no reason to, because the history is
 already on disk.
 
 So this is a plain batch job over the Parquet the cleaning query writes. It runs
-once a night against data that is already there, which means it cannot block
+on a schedule against data that is already there, which means it cannot block
 anything and cannot lose anything by failing - the next run recomputes the same
 answer from the same files.
 
@@ -19,6 +19,7 @@ number costs nothing extra and the job needs no read path into PostgreSQL.
 
 import logging
 import sys
+from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql.functions import (
@@ -156,41 +157,44 @@ def daily_trend(rated: DataFrame) -> DataFrame:
 
 def main() -> None:
     setup_logging()
-    logger.info("Starting nightly rollups over %s", settings.PARQUET_PATH)
+    logger.info("Starting rollups over %s", settings.PARQUET_PATH)
+
+    # Asked of the filesystem rather than inferred from an exception. Catching
+    # the read instead treated corruption, a permission problem and an
+    # incompatible schema as "nothing here yet" and exited successfully, so the
+    # analytical tables went stale with nothing to retry and nothing to alert
+    # on. An absent directory is the one condition that is genuinely fine.
+    if not Path(settings.PARQUET_PATH).exists():
+        logger.warning(
+            "No history at %s yet; nothing to roll up", settings.PARQUET_PATH
+        )
+        return
 
     # Its own UI port: this runs alongside the streaming application, which
     # already holds the default one.
     session = build_session(ui_port=settings.SPARK_BATCH_UI_PORT)
 
     try:
-        history = load_history(session)
-    except Exception:
-        # Nothing has been written yet. Not a failure worth waking anyone for -
-        # the next run picks it up once the streaming pipeline has produced
-        # something to roll up.
-        logger.warning(
-            "No history at %s yet; nothing to roll up", settings.PARQUET_PATH
-        )
-        session.stop()
-        return
+        # Read once and reused by both rollups; without this the whole history
+        # is scanned and the window function recomputed for each.
+        rated = with_fill_rate(load_history(session)).persist()
 
-    # Read once and reused by both rollups; without this the whole history is
-    # scanned and the window function recomputed for each.
-    rated = with_fill_rate(history).persist()
+        try:
+            hourly = hourly_profile(rated)
+            write_batch(
+                hourly, HOURLY_TABLE, HOURLY_COLUMNS, ["zone", "hour_of_day"], "upsert"
+            )
+            logger.info("Wrote %s", HOURLY_TABLE)
 
-    try:
-        hourly = hourly_profile(rated)
-        write_batch(hourly, HOURLY_TABLE, HOURLY_COLUMNS, ["zone", "hour_of_day"], "upsert")
-        logger.info("Wrote %s", HOURLY_TABLE)
-
-        daily = daily_trend(rated)
-        write_batch(daily, DAILY_TABLE, DAILY_COLUMNS, ["zone", "day"], "upsert")
-        logger.info("Wrote %s", DAILY_TABLE)
+            daily = daily_trend(rated)
+            write_batch(daily, DAILY_TABLE, DAILY_COLUMNS, ["zone", "day"], "upsert")
+            logger.info("Wrote %s", DAILY_TABLE)
+        finally:
+            rated.unpersist()
     finally:
-        rated.unpersist()
         session.stop()
 
-    logger.info("Nightly rollups complete")
+    logger.info("Rollups complete")
 
 
 if __name__ == "__main__":

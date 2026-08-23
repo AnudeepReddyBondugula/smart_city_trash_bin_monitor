@@ -1,4 +1,4 @@
-"""Tests for the nightly rollup job.
+"""Tests for the rollup job.
 
 These run on batch DataFrames because the job itself is batch - there is nothing
 to simulate. The window function is the part worth checking carefully: it
@@ -241,3 +241,49 @@ def test_daily_trend_reports_the_peak_not_only_the_average(history):
 
     assert day["avg_fill_pct"] == pytest.approx(54.0)
     assert day["max_fill_pct"] == pytest.approx(98.0)
+
+
+# ---------------------------------------------------------------------------
+# Failure handling
+# ---------------------------------------------------------------------------
+
+
+def test_a_missing_history_is_not_a_failure(monkeypatch, tmp_path):
+    """The first run happens before the streaming pipeline has written anything."""
+    from batch import rollups
+
+    monkeypatch.setattr(rollups.settings, "PARQUET_PATH", str(tmp_path / "absent"))
+    monkeypatch.setattr(
+        rollups, "build_session", lambda **_: pytest.fail("should not start Spark")
+    )
+
+    assert rollups.main() is None
+
+
+def test_an_unreadable_history_fails_loudly(monkeypatch, tmp_path, spark):
+    """Anything other than an absent directory has to reach the exit code.
+
+    Reported as "no history" and exited zero, a corrupt or unreadable history
+    left the analytical tables silently stale, with nothing for a scheduler to
+    retry and nothing for monitoring to notice.
+    """
+    from batch import rollups
+
+    history = tmp_path / "history"
+    history.mkdir()
+    (history / "part-0.parquet").write_text("this is not parquet")
+
+    # The job stops its session in a finally, and the session here is shared
+    # with every other test in the run - so it is handed one that ignores that.
+    class KeepAlive:
+        def __getattr__(self, name):
+            return getattr(spark, name)
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(rollups.settings, "PARQUET_PATH", str(history))
+    monkeypatch.setattr(rollups, "build_session", lambda **_: KeepAlive())
+
+    with pytest.raises(Exception):
+        rollups.main()
