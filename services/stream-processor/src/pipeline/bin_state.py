@@ -13,7 +13,7 @@ asked for a collection list, not a stream of the same fact. Firing once on entry
 and clearing on collection needs per-bin memory, which puts them here too.
 
 So there is one stateful operator keyed by bin, reading and writing state once
-per event, and emitting ten kinds of alert from it.
+per event, and emitting twelve kinds of alert from it.
 
 Dead-device detection is the one rule that is not a rule at all: it is the
 absence of events. Each event arms an event-time timeout, and when that fires
@@ -73,6 +73,10 @@ OUTPUT_SCHEMA = StructType(
         StructField("minutes_to_full", DoubleType()),
         StructField("sensor_faults", StringType()),
         StructField("last_seen", TimestampType()),
+        # Wall-clock time this row was produced, as opposed to last_seen, which
+        # is event time. The pair is what separates "this bin stopped
+        # reporting" from "the pipeline stopped writing".
+        StructField("updated_at", TimestampType()),
     ]
 )
 
@@ -106,9 +110,11 @@ STATE_SCHEMA = StructType(
         StructField("predicted_fired", BooleanType()),
         StructField("sla_critical_fired", BooleanType()),
         StructField("sla_overflow_fired", BooleanType()),
-        # Whether a broken sensor has already been reported for this bin, so a
-        # permanently faulty one produces a single alert rather than a stream.
-        StructField("sensor_fault_fired", BooleanType()),
+        # Which sensors were already reported broken, so a permanently faulty
+        # one produces a single alert rather than a stream - while a second
+        # sensor failing later is still news. A boolean here meant a bin whose
+        # thermometer was already dead could lose its battery reading silently.
+        StructField("reported_faults", StringType()),
         # Fire risk is the exception: it repeats while it stays true, because a
         # fire does not stop being urgent because it was already reported.
         StructField("last_fire_risk_ms", LongType()),
@@ -136,14 +142,18 @@ EMPTY_STATE = {
     "predicted_fired": False,
     "sla_critical_fired": False,
     "sla_overflow_fired": False,
-    "sensor_fault_fired": False,
+    "reported_faults": None,
     "last_fire_risk_ms": 0,
 }
 
 SEVERITY = {
     "OVERFLOW": "CRITICAL",
     "FIRE_RISK": "CRITICAL",
-    "SLA_BREACH": "CRITICAL",
+    # Two clocks, two alert types. One shared type collided in the database:
+    # both clocks can come due on the same reading, and the alert table keys on
+    # (bin_id, alert_type, fired_at), so one of the two was silently discarded.
+    "SLA_BREACH_OVERFLOW": "CRITICAL",
+    "SLA_BREACH_CRITICAL": "CRITICAL",
     "CRITICAL_FILL": "HIGH",
     "PREDICTED_OVERFLOW": "HIGH",
     "OFFLINE": "HIGH",
@@ -188,7 +198,15 @@ def _alert(memory: dict, bin_id: str, alert_type: str, event_ms: int, detail: st
         "minutes_to_full": None,
         "sensor_faults": None,
         "last_seen": _to_timestamp(memory["last_event_ms"]),
+        "updated_at": datetime.now(tz=timezone.utc),
     }
+
+
+def _faults(names) -> set[str]:
+    """The comma-separated fault names as a set, empty when there are none."""
+    if not names:
+        return set()
+    return {name for name in names.split(",") if name}
 
 
 def _to_timestamp(milliseconds) -> datetime | None:
@@ -267,7 +285,22 @@ def evaluate_reading(memory: dict, reading: dict, bin_id: str) -> list[dict]:
         )
 
     # ---- Stuck sensor ------------------------------------------------------
-    if previous_pct is not None and fill_pct == previous_pct:
+    # Not while saturated. A full bin reports exactly 100% every few seconds
+    # until a truck arrives, because the level is clamped at capacity and
+    # physically cannot read higher - so identical readings there say nothing
+    # about the sensor, and a full bin waiting for collection is the most
+    # ordinary state in the fleet.
+    #
+    # The cost is that a sensor genuinely frozen at 100% is never reported.
+    # That is not a gap worth closing: it is indistinguishable from a full bin.
+    #
+    # Zero is NOT the same case and is deliberately not excluded. Nothing
+    # clamps a bin at empty - waste accumulates - so a bin repeating 0% is a
+    # sensor that has stopped, which is exactly what the FROZEN fault produces
+    # and what this rule is for.
+    saturated = fill_pct >= 100
+
+    if previous_pct is not None and fill_pct == previous_pct and not saturated:
         memory["unchanged_count"] += 1
     else:
         memory["unchanged_count"] = 0
@@ -287,36 +320,30 @@ def evaluate_reading(memory: dict, reading: dict, bin_id: str) -> list[dict]:
         )
 
     # ---- Critical fill -----------------------------------------------------
-    if fill_pct >= settings.CRITICAL_FILL_PCT:
-        if not memory["critical_fired"]:
-            alerts.append(
-                _alert(
-                    memory,
-                    bin_id,
-                    "CRITICAL_FILL",
-                    event_ms,
-                    f"{fill_pct:.1f}% full",
-                )
+    # Cleared by a collection and by nothing else. Clearing on any reading back
+    # under the threshold looks equivalent and is not: a bin wobbling around
+    # 80% re-alerts on every crossing and restarts its SLA clock each time, so
+    # a bin nobody ever collects can stay permanently inside its SLA.
+    if fill_pct >= settings.CRITICAL_FILL_PCT and not memory["critical_fired"]:
+        alerts.append(
+            _alert(
+                memory,
+                bin_id,
+                "CRITICAL_FILL",
+                event_ms,
+                f"{fill_pct:.1f}% full",
             )
-            memory["critical_fired"] = True
-            memory["critical_since_ms"] = event_ms
-    else:
-        memory["critical_fired"] = False
-        memory["critical_since_ms"] = 0
+        )
+        memory["critical_fired"] = True
+        memory["critical_since_ms"] = event_ms
 
     # ---- Overflow ----------------------------------------------------------
-    if fill_pct >= settings.OVERFLOW_FILL_PCT:
-        if not memory["overflow_fired"]:
-            alerts.append(
-                _alert(
-                    memory, bin_id, "OVERFLOW", event_ms, f"{fill_pct:.1f}% full"
-                )
-            )
-            memory["overflow_fired"] = True
-            memory["overflow_since_ms"] = event_ms
-    else:
-        memory["overflow_fired"] = False
-        memory["overflow_since_ms"] = 0
+    if fill_pct >= settings.OVERFLOW_FILL_PCT and not memory["overflow_fired"]:
+        alerts.append(
+            _alert(memory, bin_id, "OVERFLOW", event_ms, f"{fill_pct:.1f}% full")
+        )
+        memory["overflow_fired"] = True
+        memory["overflow_since_ms"] = event_ms
 
     # ---- Predicted overflow ------------------------------------------------
     fill_rate, minutes_to_full = fill_projection(
@@ -391,22 +418,25 @@ def evaluate_reading(memory: dict, reading: dict, bin_id: str) -> list[dict]:
     # failed. Without an alert here that repair would be silent, and a bin whose
     # thermometer died would quietly stop contributing to fire risk with nobody
     # told - which is the same blind spot as discarding it, only harder to see.
+    # Compared as a set of names rather than as "any fault at all", so a second
+    # sensor failing while the first is still broken is reported. Recovery needs
+    # no branch of its own: the remembered set is replaced by what this reading
+    # says, so a name that stops appearing stops being outstanding.
     faults = reading.get("sensor_faults")
+    new_faults = _faults(faults) - _faults(memory["reported_faults"])
 
-    if faults:
-        if not memory["sensor_fault_fired"]:
-            alerts.append(
-                _alert(
-                    memory,
-                    bin_id,
-                    "SENSOR_FAULT",
-                    event_ms,
-                    f"unusable readings from: {faults}",
-                )
+    if new_faults:
+        alerts.append(
+            _alert(
+                memory,
+                bin_id,
+                "SENSOR_FAULT",
+                event_ms,
+                f"unusable readings from: {','.join(sorted(new_faults))}",
             )
-            memory["sensor_fault_fired"] = True
-    else:
-        memory["sensor_fault_fired"] = False
+        )
+
+    memory["reported_faults"] = faults or None
 
     # ---- SLA clocks --------------------------------------------------------
     alerts.extend(_sla_breaches(memory, bin_id, event_ms))
@@ -428,17 +458,19 @@ def _sla_breaches(memory: dict, bin_id: str, event_ms: int) -> list[dict]:
             "overflow_since_ms",
             "sla_overflow_fired",
             settings.SLA_OVERFLOW_MINUTES,
+            "SLA_BREACH_OVERFLOW",
             "overflowing",
         ),
         (
             "critical_since_ms",
             "sla_critical_fired",
             settings.SLA_CRITICAL_MINUTES,
+            "SLA_BREACH_CRITICAL",
             "critical",
         ),
     )
 
-    for since_key, fired_key, allowed_minutes, label in clocks:
+    for since_key, fired_key, allowed_minutes, alert_type, label in clocks:
         started = memory[since_key]
         if not started or memory[fired_key]:
             continue
@@ -449,7 +481,7 @@ def _sla_breaches(memory: dict, bin_id: str, event_ms: int) -> list[dict]:
                 _alert(
                     memory,
                     bin_id,
-                    "SLA_BREACH",
+                    alert_type,
                     event_ms,
                     f"{label} for {elapsed_minutes:.0f} minutes, "
                     f"allowed {allowed_minutes:.0f}",
@@ -505,6 +537,7 @@ def state_record(
         "minutes_to_full": minutes_to_full,
         "sensor_faults": sensor_faults,
         "last_seen": _to_timestamp(memory["last_event_ms"]),
+        "updated_at": datetime.now(tz=timezone.utc),
     }
 
 
@@ -636,6 +669,10 @@ STATE_COLUMNS = [
     "minutes_to_full",
     "sensor_faults",
     "last_seen",
+    # Written explicitly. Left to the column default it recorded when the bin
+    # was first seen and never moved again, since an upsert that does not name
+    # a column does not touch it.
+    "updated_at",
 ]
 
 

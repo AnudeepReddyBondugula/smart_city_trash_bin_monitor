@@ -1,7 +1,7 @@
 """Tests for Query 2 - the per-bin rules.
 
 The rules are plain Python over a dictionary of remembered values, so they are
-tested directly with no Spark session. That is deliberate: these ten rules carry
+tested directly with no Spark session. That is deliberate: these twelve rules carry
 almost all the behaviour anyone will argue about, and they should be readable and
 fast to check.
 
@@ -515,7 +515,7 @@ def test_a_bin_left_uncollected_breaches_its_sla():
         ),
     )
 
-    assert "SLA_BREACH" in fired
+    assert "SLA_BREACH_CRITICAL" in fired
 
 
 def test_a_bin_collected_in_time_does_not():
@@ -532,7 +532,7 @@ def test_a_bin_collected_in_time_does_not():
         ),
     )
 
-    assert "SLA_BREACH" not in fired
+    assert not [alert for alert in fired if alert.startswith("SLA_BREACH")]
 
 
 def test_an_overflowing_bin_is_on_a_shorter_clock():
@@ -548,7 +548,7 @@ def test_an_overflowing_bin_is_on_a_shorter_clock():
         ),
     )
 
-    assert "SLA_BREACH" in fired
+    assert "SLA_BREACH_OVERFLOW" in fired
 
 
 def test_an_sla_breach_is_reported_once():
@@ -563,7 +563,7 @@ def test_an_sla_breach_is_reported_once():
 
     fired = feed(memory, reading(fill_pct=85.0, event_ms=START_MS), *late)
 
-    assert fired.count("SLA_BREACH") == 1
+    assert fired.count("SLA_BREACH_CRITICAL") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -717,3 +717,200 @@ def test_output_rows_match_the_declared_schema():
     out = run_operator(state, reading(fill_pct=85.0))
 
     assert list(out.columns) == OUTPUT_SCHEMA.fieldNames()
+
+
+# ---------------------------------------------------------------------------
+# Regressions found in review
+# ---------------------------------------------------------------------------
+
+
+def test_wobbling_across_the_threshold_does_not_re_alert():
+    """A dip below the line is not a collection, and must not read as one.
+
+    Clearing the fire-once flag on any reading under the threshold meant a bin
+    oscillating around 80% alerted on every crossing - and, worse, restarted
+    the SLA clock each time, so a bin nobody ever collected could stay inside
+    its SLA forever.
+    """
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(fill_pct=81.0, event_ms=START_MS),
+        reading(fill_pct=79.0, event_ms=START_MS + minutes(1)),
+        reading(fill_pct=81.0, event_ms=START_MS + minutes(2)),
+    )
+
+    assert fired.count("CRITICAL_FILL") == 1
+    assert memory["critical_since_ms"] == START_MS
+
+
+def test_wobbling_across_the_threshold_does_not_postpone_an_sla_breach():
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(fill_pct=81.0, event_ms=START_MS),
+        reading(fill_pct=79.0, event_ms=START_MS + minutes(1)),
+        reading(
+            fill_pct=81.0,
+            event_ms=START_MS + minutes(settings.SLA_CRITICAL_MINUTES + 5),
+        ),
+    )
+
+    assert "SLA_BREACH_CRITICAL" in fired
+
+
+def test_wobbling_across_the_overflow_threshold_behaves_the_same():
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(fill_pct=96.0, event_ms=START_MS),
+        reading(fill_pct=94.0, event_ms=START_MS + minutes(1)),
+        reading(fill_pct=96.0, event_ms=START_MS + minutes(2)),
+    )
+
+    assert fired.count("OVERFLOW") == 1
+    assert memory["overflow_since_ms"] == START_MS
+
+
+def test_a_full_bin_is_not_a_stuck_sensor():
+    """100% repeated is what a full bin looks like, not what a broken one does.
+
+    The simulator caps fill at capacity, so every bin waiting for a truck
+    reports exactly 100% each tick - the most ordinary state in the fleet, and
+    it was being reported as a hardware fault.
+    """
+    memory = fresh_memory()
+    full = [
+        reading(fill_pct=100.0, event_ms=START_MS + minutes(index))
+        for index in range(settings.STUCK_READING_COUNT + 5)
+    ]
+
+    assert "SENSOR_STUCK" not in feed(memory, *full)
+
+
+def test_a_sensor_frozen_at_empty_is_still_reported():
+    """Zero is not the mirror of 100%, and excluding it hid the FROZEN fault.
+
+    A full bin repeats 100% because the level is clamped at capacity. Nothing
+    clamps a bin at empty - waste accumulates - so a bin repeating 0% has a
+    sensor that stopped. Bins are seeded empty, so excluding zero suppressed
+    the alert for every frozen bin in the fleet, which an end-to-end run caught
+    and the unit tests did not.
+    """
+    memory = fresh_memory()
+    empty = [
+        reading(fill_pct=0.0, event_ms=START_MS + minutes(index))
+        for index in range(settings.STUCK_READING_COUNT + 5)
+    ]
+
+    assert "SENSOR_STUCK" in feed(memory, *empty)
+
+
+def test_a_frozen_sensor_between_the_rails_is_still_reported():
+    """The narrowing must not disable the detector it narrows."""
+    memory = fresh_memory()
+    same = [
+        reading(fill_pct=42.0, event_ms=START_MS + minutes(index))
+        for index in range(settings.STUCK_READING_COUNT + 2)
+    ]
+
+    assert "SENSOR_STUCK" in feed(memory, *same)
+
+
+def test_both_sla_clocks_breaching_at_once_produce_distinct_alerts():
+    """One alert type for both clocks collided in the database.
+
+    bin_alerts keys on (bin_id, alert_type, fired_at) and both breaches carry
+    the same event timestamp, so the second was silently discarded on insert.
+    """
+    memory = fresh_memory()
+    later = START_MS + minutes(settings.SLA_CRITICAL_MINUTES + 5)
+
+    evaluate_reading(memory, reading(fill_pct=97.0, event_ms=START_MS), BIN)
+    alerts = evaluate_reading(memory, reading(fill_pct=98.0, event_ms=later), BIN)
+
+    breaches = [alert for alert in alerts if alert["alert_type"].startswith("SLA_")]
+    keys = {(alert["bin_id"], alert["alert_type"], alert["fired_at"]) for alert in breaches}
+
+    assert len(breaches) == 2
+    # Same instant, so only the alert type keeps them apart in the table.
+    assert len({alert["fired_at"] for alert in breaches}) == 1
+    assert len(keys) == 2
+
+
+def test_a_second_failing_sensor_is_reported():
+    """One boolean for every sensor hid the second failure entirely."""
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(sensor_faults="temperature", event_ms=START_MS),
+        reading(
+            sensor_faults="temperature,battery_level",
+            event_ms=START_MS + minutes(1),
+        ),
+    )
+
+    assert fired.count("SENSOR_FAULT") == 2
+
+
+def test_the_same_failing_sensor_is_not_reported_twice():
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(sensor_faults="temperature", event_ms=START_MS),
+        reading(sensor_faults="temperature", event_ms=START_MS + minutes(1)),
+        reading(sensor_faults="temperature", event_ms=START_MS + minutes(2)),
+    )
+
+    assert fired.count("SENSOR_FAULT") == 1
+
+
+def test_a_recovered_sensor_can_fail_again():
+    """Recovery clears the name, so the next failure is news again."""
+    memory = fresh_memory()
+
+    fired = feed(
+        memory,
+        reading(sensor_faults="temperature", event_ms=START_MS),
+        reading(sensor_faults=None, event_ms=START_MS + minutes(1)),
+        reading(sensor_faults="temperature", event_ms=START_MS + minutes(2)),
+    )
+
+    assert fired.count("SENSOR_FAULT") == 2
+
+
+def test_the_state_row_records_when_it_was_written():
+    """updated_at is wall clock, last_seen is event time - both are needed.
+
+    Omitted from the written columns it kept its insert default forever, so it
+    reported when the bin was first seen and never moved again.
+    """
+    state = FakeGroupState()
+    frame = pd.DataFrame(
+        [
+            {
+                "bin_id": BIN,
+                "zone": "CENTRAL",
+                "capacity": 100.0,
+                "current_fill_level": 50.0,
+                "fill_pct": 50.0,
+                "battery_level": 80.0,
+                "temperature": 25.0,
+                "latitude": 17.4,
+                "longitude": 78.5,
+                "sensor_faults": None,
+                "event_time": pd.Timestamp(START_MS, unit="ms", tz="UTC"),
+            }
+        ]
+    )
+
+    rows = pd.concat(list(track_bin((BIN,), iter([frame]), state)))
+    states = rows[rows["record_type"] == RECORD_STATE]
+
+    assert len(states) == 1
+    assert states.iloc[0]["updated_at"] is not None
