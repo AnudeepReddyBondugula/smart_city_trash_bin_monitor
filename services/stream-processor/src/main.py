@@ -6,6 +6,8 @@ one of them can be reset without disturbing the rest.
 """
 
 import logging
+import signal
+import threading
 
 from config import get_settings
 from logging_config import setup_logging
@@ -18,12 +20,18 @@ setup_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# How long to block in the JVM before returning to Python to notice a signal.
+# Python runs a signal handler between bytecodes, so while the main thread sits
+# inside a py4j call nothing is noticed - which is why an unbounded wait here
+# meant SIGTERM was ignored until Docker gave up and sent SIGKILL.
+SHUTDOWN_POLL_SECONDS = 5
+
 
 def start_parquet_history(clean_events):
     """
     Write every clean reading to Parquet, partitioned by date.
 
-    This is the history the nightly job reads, and the only place a question
+    This is the history the batch job reads, and the only place a question
     nobody has asked yet can still be answered from.
     """
     return (
@@ -58,6 +66,31 @@ def start_dead_letters(raw):
     )
 
 
+def run(session, queries, stop_requested: threading.Event) -> None:
+    """
+    Block until a query ends or a stop is asked for, then shut down in order.
+
+    Stopping the queries rather than letting the process be killed lets each one
+    finish the micro-batch it is in and commit its offsets. Nothing is lost
+    either way - checkpoints exist for exactly that, and every write is
+    idempotent - but a killed container reports as a crash, which is a bad
+    signal to leave in `docker compose ps` for an ordinary stop.
+    """
+    while not stop_requested.is_set():
+        # Raises if a query failed, which is how a failure still surfaces.
+        if session.streams.awaitAnyTermination(timeout=SHUTDOWN_POLL_SECONDS):
+            logger.warning("A streaming query ended on its own")
+            break
+
+    for query in queries:
+        if query.isActive:
+            logger.info("Stopping query %s", query.name)
+            query.stop()
+
+    session.stop()
+    logger.info("Shutdown complete")
+
+
 def main() -> None:
     logger.info("Starting stream processor")
 
@@ -80,9 +113,16 @@ def main() -> None:
         ", ".join(query.name for query in queries),
     )
 
-    # Blocks until any query fails, which surfaces the failure instead of
-    # leaving the process alive with a dead query inside it.
-    session.streams.awaitAnyTermination()
+    stop_requested = threading.Event()
+
+    def handle_shutdown(*_):
+        logger.info("Shutdown signal received")
+        stop_requested.set()
+
+    for received in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(received, handle_shutdown)
+
+    run(session, queries, stop_requested)
 
 
 if __name__ == "__main__":
