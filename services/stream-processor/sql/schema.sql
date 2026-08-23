@@ -129,18 +129,28 @@ CREATE INDEX IF NOT EXISTS zone_daily_trend_day_idx
 -- ---------------------------------------------------------------------------
 -- Every one of these is an aggregate of the three tables above, so the
 -- dashboard costs no streaming work of its own. A bin counts as active if it
--- has reported inside the offline threshold, which is the same 15 minutes the
+-- has reported inside the offline threshold, which is the same window the
 -- dead-device rule uses; anything older is what "offline" means here.
+--
+-- The placeholders below are filled in by sinks.apply_schema() from the same
+-- settings the detection rules read, so the dashboard and the alerts cannot
+-- disagree about what "critical" or "offline" means. Running this file through
+-- psql directly will not work for that reason - go through the service.
 CREATE OR REPLACE VIEW city_kpi AS
 SELECT
     (SELECT count(*) FROM bin_state_latest)                             AS total_bins,
     (SELECT count(*) FROM bin_state_latest
-      WHERE last_seen > now() - INTERVAL '15 minutes')                  AS active_bins,
+      WHERE last_seen > now() - {offline_minutes} * INTERVAL '1 minute')
+                                                                          AS active_bins,
     (SELECT count(*) FROM bin_state_latest
-      WHERE last_seen <= now() - INTERVAL '15 minutes')                 AS offline_bins,
-    (SELECT count(*) FROM bin_state_latest WHERE fill_pct >= 80)        AS critical_bins,
-    (SELECT count(*) FROM bin_state_latest WHERE fill_pct >= 95)        AS overflowing_bins,
-    (SELECT count(*) FROM bin_state_latest WHERE battery_level < 20)    AS low_battery_bins,
+      WHERE last_seen <= now() - {offline_minutes} * INTERVAL '1 minute')
+                                                                          AS offline_bins,
+    (SELECT count(*) FROM bin_state_latest WHERE fill_pct >= {critical_fill_pct})
+                                                                          AS critical_bins,
+    (SELECT count(*) FROM bin_state_latest WHERE fill_pct >= {overflow_fill_pct})
+                                                                          AS overflowing_bins,
+    (SELECT count(*) FROM bin_state_latest WHERE battery_level < {low_battery_pct})
+                                                                          AS low_battery_bins,
     (SELECT round(avg(fill_pct)::numeric, 2) FROM bin_state_latest)     AS avg_fill_pct,
     (SELECT round(avg(temperature)::numeric, 2) FROM bin_state_latest)  AS avg_temperature,
     (SELECT count(*) FROM bin_alerts
@@ -152,7 +162,7 @@ SELECT
       WHERE alert_type = 'FIRE_RISK'
         AND fired_at >= date_trunc('day', now()))                       AS fire_risk_today,
     (SELECT count(*) FROM bin_alerts
-      WHERE alert_type = 'SLA_BREACH'
+      WHERE alert_type LIKE 'SLA_BREACH%'
         AND fired_at >= date_trunc('day', now()))                       AS sla_breaches_today,
     -- Bins reporting at least one unusable sensor. These are still counted in
     -- every figure above, which is the point: a bin with a dead thermometer is
@@ -167,7 +177,7 @@ SELECT
     zone,
     count(*)                                  AS bins,
     round(avg(fill_pct)::numeric, 2)          AS avg_fill_pct,
-    count(*) FILTER (WHERE fill_pct >= 80)    AS critical_bins,
+    count(*) FILTER (WHERE fill_pct >= {critical_fill_pct}) AS critical_bins,
     round(avg(temperature)::numeric, 2)       AS avg_temperature
 FROM bin_state_latest
 GROUP BY zone

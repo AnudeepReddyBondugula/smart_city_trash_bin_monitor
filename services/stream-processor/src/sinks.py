@@ -33,6 +33,24 @@ def connect():
     return closing(psycopg2.connect(settings.DATABASE_URL))
 
 
+def schema_sql() -> str:
+    """
+    The schema file with the pipeline's thresholds filled in.
+
+    The dashboard views count the same things the detection rules alert on, so
+    hardcoding the numbers in both places let them disagree: the documented
+    demo profile drops the offline threshold to one minute, and the view went
+    on calling a bin active for the next fourteen. There is one source for
+    them, and this is where it reaches SQL.
+    """
+    return SCHEMA_PATH.read_text().format(
+        offline_minutes=settings.OFFLINE_AFTER_MINUTES,
+        critical_fill_pct=settings.CRITICAL_FILL_PCT,
+        overflow_fill_pct=settings.OVERFLOW_FILL_PCT,
+        low_battery_pct=settings.LOW_BATTERY_PCT,
+    )
+
+
 def apply_schema() -> None:
     """
     Create the output tables and views if they are not already there.
@@ -44,7 +62,7 @@ def apply_schema() -> None:
 
     with connect() as connection:
         with connection, connection.cursor() as cursor:
-            cursor.execute(SCHEMA_PATH.read_text())
+            cursor.execute(schema_sql())
 
     logger.info("Analytical schema applied")
 
